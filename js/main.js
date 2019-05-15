@@ -1,25 +1,102 @@
 
 import { mkel, shuffle } from './util.js'
 
-function new_object (fs, ms) {
-  if (!ms) {
-    ms = fs
-    fs = null
+function new_object (state, fs, api) {
+  let o = {}
+
+  let ms = {}
+  for (let f in fs) {
+    let m = fs[f].bind(ms)
+    ms[f] = m
   }
 
-  let o = {}
-  for (let m in ms) {
-    o[m] = ms[m].bind(fs)
+  for (let f in api) {
+    // let spec = pub[m]
+    let m = fs[f].bind(ms, state)
+    o[f] = m
   }
 
   return Object.seal(o)
+}
+
+const FIELD_FUNCS = {
+  find_lit (array) {
+    let queue = array.filter(e => e.type === 'src')
+    let lit = new Set(queue.map(e => e.n))
+
+    while (queue.length > 0) {
+      let c0 = queue.shift()
+      for (let s = 0; s < 4; s++) {
+        if (c0.routes[s]) {
+          let nn = c0.neighbours[s]
+          if (nn != null) {
+            let n = array[nn]
+            if (n.routes[opposites[s]]) {
+              if (!lit.has(nn)) {
+                lit.add(nn)
+                queue.push(n)
+              }
+            }
+          }
+        }
+      }
+    }
+    return lit
+  },
+
+  rows (state) {
+    const iter = function* () {
+      for (let y = 0; y < state.h; y++) {
+        yield function*() {
+          for (let x = 0; x < state.w; x++) {
+            let c = state.array[(y * state.w) + x]
+            yield {
+              type: c.type,
+              on: state.lit.has(c.n),
+              routes: c.routes
+            }
+          }
+        }
+      }
+    }
+    return iter()
+  },
+
+  shuffle (state) {
+    for (let cell of state.array) {
+      let n = Math.random()*4
+      for (let r = 0; r < n; r++) {
+        cell.routes.unshift(cell.routes.pop())
+      }
+    }
+    state.lit = this.find_lit(state.array)
+  },
+
+  rotate (state, x, y) {
+    let cell = state.array[(y * state.w) + x]
+    cell.routes.unshift(cell.routes.pop())
+    state.lit = this.find_lit(state.array)
+  },
+
+  is_won (state) {
+    return state.tgts.every(e => state.lit.has(e.n))
+  }
+}
+
+const FIELD_API = {
+  is_won: {},
+  shuffle: {},
+  rotate: {},
+  rows: {}
 }
 
 // t, r, b, l => b, l, t, r
 const opposites = [ 2, 3, 0, 1 ]
 
 function new_field (w, h) {
-  let array = Array(w * h)
+  let state = { w, h }
+
+  const array = Array(w * h)
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -40,75 +117,31 @@ function new_field (w, h) {
     }
   }
 
-  const find_lit = () => {
-    let queue = array.filter(e => e.type === 'src')
-    let lit = new Set(queue.map(e => e.n))
-
-    while (queue.length > 0) {
-      let c0 = queue.shift()
-      for (let s = 0; s < 4; s++) {
-        if (c0.routes[s]) {
-          let nn = c0.neighbours[s]
-          // console.log(c0.n, c0.routes, s, nn)
-          if (nn != null) {
-            let n = array[nn]
-            if (n.routes[opposites[s]]) {
-              if (!lit.has(nn)) {
-                lit.add(nn)
-                queue.push(n)
-              }
-            }
-          }
-        }
-      }
-    }
-    return lit
-  }
+  let src = array[Math.floor(Math.random() * array.length)]
+  src.type = 'src'
+  let tgts = []
 
   {
-    {
-      let src = array[Math.floor(Math.random() * array.length)]
-      src.type = 'src'
-    }
-
-    let num_tgts = 10
-
-    {
-      let num_joints = 0
-      for (let cell of array) {
-        let n = cell.routes.filter(e => e).length
-        if (cell.type === 'pipe') {
-          num_joints += n-2
-        } else if (cell.type === 'src') {
-          num_joints += n
+    let changed = true
+    while (changed) {
+      changed = false
+      for (let cell of shuffle(Array.from(array))) {
+        if (cell.type === 'src' && cell.routes.filter(e => e).length === 1) {
+          continue
         }
-      }
-
-      let changed = true
-      while (num_joints > num_tgts && changed) {
-        changed = false
-        for (let cell of shuffle(Array.from(array))) {
-          if (cell.type === 'tgt') {
+        if (cell.type === 'pipe' && cell.routes.filter(e => e).length === 2) {
+          continue
+        }
+        for (let i = 0; i < 4; i++) {
+          if (!cell.routes[i]) {
             continue
           }
-          if (cell.type === 'src' && cell.routes.filter(e => e).length === 1) {
-            continue
+          cell.routes[i] = false
+          if (FIELD_FUNCS.find_lit(array).size === w*h) {
+            changed = true
+            break
           }
-          if (cell.type === 'pipe' && cell.routes.filter(e => e).length === 2) {
-            continue
-          }
-          for (let i = 0; i < 4; i++) {
-            if (!cell.routes[i]) {
-              continue
-            }
-            cell.routes[i] = false
-            if (find_lit().size === w*h) {
-              num_joints--
-              changed = true
-              break
-            }
-            cell.routes[i] = true
-          }
+          cell.routes[i] = true
         }
       }
     }
@@ -128,6 +161,7 @@ function new_field (w, h) {
             if (!n.routes[opposites[s]]) {
               cell.type = 'tgt'
               cell.routes[s] = false
+              tgts.push(cell)
               continue cells
             }
           }
@@ -136,72 +170,35 @@ function new_field (w, h) {
     }
   }
 
-  for (let cell of array) {
-    let n = Math.random()*4
-    for (let r = 0; r < n; r++) {
-      cell.routes.unshift(cell.routes.pop())
-    }
-  }
+  state.array = array
+  state.src = src
+  state.tgts = tgts
+  state.lit = FIELD_FUNCS.find_lit(array)
 
-  let s = {
-    lit: find_lit()
-  }
-
-  return new_object({
-    rotate: (x, y) => {
-      let cell = array[(y * w) + x]
-      cell.routes.unshift(cell.routes.pop())
-      s.lit = find_lit()
-    },
-    rows: function* () {
-      for (let y = 0; y < h; y++) {
-        yield function*() {
-          for (let x = 0; x < w; x++) {
-            let c = array[(y * w) + x]
-            yield {
-              type: c.type,
-              on: s.lit.has(c.n),
-              routes: c.routes
-            }
-          }
-        }
-      }
-    }
-  })
+  return new_object(state, FIELD_FUNCS, FIELD_API)
 }
 
-function new_game (element, opts) {
-  let w = 6
-  let h = 7
-
-  let border_width = 4
-
-  let cell_width = 50
-
-  let canvas_width = w*cell_width + border_width*2
-  let canvas_height = h*cell_width + border_width*2
-
-  let field = new_field(w, h)
-
-  let canvas = mkel('canvas', { width: canvas_width, height: canvas_height })
-  element.appendChild(canvas)
-
-  const drawBorder = (ctx) => {
+const GAME_FUNCS = {
+  drawBorder (s, ctx) {
     ctx.save()
-    ctx.strokeStyle = 'rgba(0,0,0,1)'
-    ctx.lineWidth = border_width
-    ctx.rect(border_width/2, border_width/2, canvas_width - border_width, canvas_height - border_width)
+    if (s.field.is_won()) {
+      ctx.strokeStyle = 'rgba(0,255,0,1)'
+    } else {
+      ctx.strokeStyle = 'rgba(255,0,0,1)'
+    }
+    ctx.lineWidth = s.border_width
+    ctx.rect(s.border_width/2, s.border_width/2, s.canvas_width - s.border_width, s.canvas_height - s.border_width)
     ctx.stroke()
     ctx.restore()
-  }
-  const drawSrc = (ctx, routes) => {
+  },
+  drawSrc (s, ctx, routes) {
     ctx.save()
-    ctx.translate(cell_width/2, cell_width/2)
+    ctx.translate(s.cell_width/2, s.cell_width/2)
     ctx.fillStyle = 'rgba(0,0,0,1)'
 
     for (let y of routes) {
       if (y) {
-        ctx.fillRect(-2, 0, 4, -cell_width/2)
+        ctx.fillRect(-2, 0, 4, -s.cell_width/2)
       }
       ctx.rotate(Math.PI/2)
     }
@@ -211,29 +208,29 @@ function new_game (element, opts) {
     ctx.fill()
 
     ctx.restore()
-  }
-  const drawPipe = (ctx, on, routes) => {
+  },
+  drawPipe (s, ctx, on, routes) {
     ctx.save()
-    ctx.translate(cell_width/2, cell_width/2)
+    ctx.translate(s.cell_width/2, s.cell_width/2)
     ctx.fillStyle = 'rgba(0,0,0,1)'
 
     for (let y of routes) {
       if (y) {
-        ctx.fillRect(-2, 0, 4, -cell_width/2)
+        ctx.fillRect(-2, 0, 4, -s.cell_width/2)
       }
       ctx.rotate(Math.PI/2)
     }
 
     ctx.restore()
-  }
-  const drawTgt = (ctx, on, routes) => {
+  },
+  drawTgt (s, ctx, on, routes) {
     ctx.save()
-    ctx.translate(cell_width/2, cell_width/2)
+    ctx.translate(s.cell_width/2, s.cell_width/2)
     ctx.fillStyle = 'rgba(255,255,255,1)'
 
     for (let y of routes) {
       if (y) {
-        ctx.fillRect(-2, 0, 4, -cell_width/2)
+        ctx.fillRect(-2, 0, 4, -s.cell_width/2)
       }
       ctx.rotate(Math.PI/2)
     }
@@ -243,74 +240,122 @@ function new_game (element, opts) {
     ctx.fill()
 
     ctx.restore()
-  }
-  const drawCell = (ctx, cell) => {
+  },
+  drawCell (s, ctx, cell) {
     ctx.save()
     if (cell.on) {
       ctx.fillStyle = 'rgba(0,255,0,1)'
     } else {
       ctx.fillStyle = 'rgba(255,0,0,1)'
     }
-    ctx.fillRect(1, 1, cell_width-2, cell_width-2)
+    ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
     switch (cell.type) {
       case 'src':
-        drawSrc(ctx, cell.routes)
+        this.drawSrc(s, ctx, cell.routes)
         break
       case 'tgt':
-        drawTgt(ctx, cell.on, cell.routes)
+        this.drawTgt(s, ctx, cell.on, cell.routes)
         break
       case 'pipe':
-        drawPipe(ctx, cell.on, cell.routes)
+        this.drawPipe(s, ctx, cell.on, cell.routes)
         break
     }
     ctx.restore()
-  }
-  const drawCells = (ctx) => {
+  },
+  drawCells (s, ctx) {
     ctx.save()
-    for (let r of field.rows()) {
+    for (let r of s.field.rows()) {
       ctx.save()
       for (let c of r()) {
-        drawCell(ctx, c)
-        ctx.translate(cell_width, 0)
+        this.drawCell(s, ctx, c)
+        ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
-      ctx.translate(0, cell_width)
+      ctx.translate(0, s.cell_width)
     }
     ctx.restore()
-  }
-  const draw = () => {
-    let ctx = canvas.getContext('2d')
-    ctx.clearRect(0, 0, canvas_width, canvas_height)
+  },
+  draw (s) {
+    let ctx = s.canvas.getContext('2d')
+    ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
     ctx.save()
-    drawBorder(ctx)
-    ctx.translate(border_width, border_width)
-    drawCells(ctx)
+    this.drawBorder(s, ctx)
+    ctx.translate(s.border_width, s.border_width)
+    this.drawCells(s, ctx)
     ctx.restore()
 
+    s.click_counter.textContent = s.clicks
     // window.requestAnimationFrame(draw)
-  }
+  },
 
-  const on_click = (e) => {
-    let x = Math.floor((e.offsetX - border_width) / cell_width)
-    let y = Math.floor((e.offsetY - border_width) / cell_width)
-    field.rotate(x, y)
-    draw()
-  }
+  on_click (s, e) {
+    let x = Math.floor((e.offsetX - s.border_width) / s.cell_width)
+    let y = Math.floor((e.offsetY - s.border_width) / s.cell_width)
+    s.field.rotate(x, y)
 
-  return new_object({
-    start: () => {
-      draw()
-      canvas.addEventListener('click', on_click)
-    },
-    log: () => {
-      for (let r of field.rows()) {
-        for (let c of r()) {
-          console.log(c)
-        }
+    let ac = `${x}.${y}`
+    if (ac !== s.active_cell) {
+      s.active_cell = ac
+      s.clicks++
+    }
+
+    this.draw(s)
+  },
+
+  new_game (s) {
+    s.field = new_field(s.w, s.h)
+    s.field.shuffle()
+    s.clicks = 0
+    this.draw(s)
+  },
+
+  start (s) {
+    this.new_game(s)
+    s.canvas.addEventListener('click', (e) => this.on_click(s, e))
+    s.new_game_button.addEventListener('click', (e) => this.new_game(s))
+  },
+
+  log (s) {
+    for (let r of s.field.rows()) {
+      for (let c of r()) {
+        console.log(c)
       }
     }
-  })
+  }
+}
+
+const GAME_API = {
+  start: {},
+  log: {}
+}
+
+function new_game (element, opts) {
+  let s = {
+    element: element,
+    w: 6,
+    h: 7,
+    border_width: 4,
+    cell_width: 50,
+    field: null,
+    active_cell: null,
+    clicks: 0,
+  }
+
+  s.canvas_width = s.w*s.cell_width + s.border_width*2
+  s.canvas_height = s.h*s.cell_width + s.border_width*2
+
+  s.canvas = mkel('canvas', { width: s.canvas_width, height: s.canvas_height })
+  s.element.appendChild(s.canvas)
+  let controls = mkel('div')
+  s.new_game_button = mkel('button', { text: 'new game' })
+  s.click_counter = mkel('span', { text: '0' })
+  controls.appendChild(s.new_game_button)
+  controls.appendChild(mkel('span', { text: 'moves: ' }))
+  controls.appendChild(s.click_counter)
+  s.element.appendChild(controls)
+
+  return new_object(s, GAME_FUNCS, GAME_API)
 }
 
 document.addEventListener('DOMContentLoaded', e => {
