@@ -286,7 +286,9 @@ const GAME_FUNCS = {
     ctx.restore()
 
     s.click_counter.textContent = s.clicks
-    // window.requestAnimationFrame(draw)
+    s.time_counter.textContent = Math.round((new Date() - s.time) / 1000)
+
+    // window.requestAnimationFrame(() => this.draw(s))
   },
 
   on_click (s, e) {
@@ -307,6 +309,7 @@ const GAME_FUNCS = {
     s.field = new_field(s.w, s.h)
     s.field.shuffle()
     s.clicks = 0
+    s.time = new Date()
     this.draw(s)
   },
 
@@ -340,6 +343,7 @@ function new_game (element, opts) {
     field: null,
     active_cell: null,
     clicks: 0,
+    time: null,
   }
 
   s.canvas_width = s.w*s.cell_width + s.border_width*2
@@ -347,12 +351,16 @@ function new_game (element, opts) {
 
   s.canvas = mkel('canvas', { width: s.canvas_width, height: s.canvas_height })
   s.element.appendChild(s.canvas)
+
   let controls = mkel('div')
   s.new_game_button = mkel('button', { text: 'new game' })
-  s.click_counter = mkel('span', { text: '0' })
   controls.appendChild(s.new_game_button)
-  controls.appendChild(mkel('span', { text: 'moves: ' }))
+  s.click_counter = mkel('span', { text: '0' })
+  controls.appendChild(mkel('span', { text: ' moves: ' }))
   controls.appendChild(s.click_counter)
+  s.time_counter = mkel('span', { text: '0' })
+  controls.appendChild(mkel('span', { text: ' time: ' }))
+  controls.appendChild(s.time_counter)
   s.element.appendChild(controls)
 
   return new_object(s, GAME_FUNCS, GAME_API)
