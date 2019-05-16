@@ -126,19 +126,21 @@ function new_field (w, h, wrap) {
     while (changed) {
       changed = false
       for (let cell of shuffle(Array.from(array))) {
-        if (cell.type === 'src' && cell.routes.filter(e => e).length === 1) {
+        let sides = cell.routes.filter(e => e).length
+        let can_take = sides - (cell.type === 'src' ? 1 : 2)
+        if (can_take < 1) {
           continue
         }
-        if (cell.type === 'pipe' && cell.routes.filter(e => e).length === 2) {
-          continue
-        }
-        for (let i = 0; i < 4; i++) {
+        let order = shuffle([0, 1, 2, 3])
+        for (let i of order) {
           if (!cell.routes[i]) {
             continue
           }
           cell.routes[i] = false
           if (FIELD_FUNCS.find_lit(array).size === w*h) {
             changed = true
+            if (--can_take > 0)
+              continue
             break
           }
           cell.routes[i] = true
