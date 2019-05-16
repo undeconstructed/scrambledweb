@@ -93,7 +93,7 @@ const FIELD_API = {
 // t, r, b, l => b, l, t, r
 const opposites = [ 2, 3, 0, 1 ]
 
-function new_field (w, h) {
+function new_field (w, h, wrap) {
   let state = { w, h }
 
   const array = Array(w * h)
@@ -103,10 +103,10 @@ function new_field (w, h) {
       let n = (y * w) + x
       let max = w * h - 1
 
-      let t = y > 0 ? n - w : null
-      let r = x < (w-1) ? n + 1 : null
-      let b = y < (h-1) ? n + w : null
-      let l = x > 0 ? n - 1 : null
+      let t = y > 0 ? n - w : (wrap ? (w*h) - w + x : null)
+      let r = x < (w-1) ? n + 1 : (wrap ? n - w + 1 : null)
+      let b = y < (h-1) ? n + w : (wrap ? x : null)
+      let l = x > 0 ? n - 1 : (wrap ? n + w - 1 : null)
 
       let neighbours = [ t, r, b, l ]
 
@@ -306,8 +306,12 @@ const GAME_FUNCS = {
   },
 
   new_game (s) {
-    s.field = new_field(s.w, s.h)
+    s.field = new_field(s.w, s.h, s.wrap)
     s.field.shuffle()
+    s.canvas_width = s.w*s.cell_width + s.border_width*2
+    s.canvas_height = s.h*s.cell_width + s.border_width*2
+    s.canvas.width = s.canvas_width
+    s.canvas.height = s.canvas_height
     s.clicks = 0
     s.time = new Date()
     this.draw(s)
@@ -316,7 +320,15 @@ const GAME_FUNCS = {
   start (s) {
     this.new_game(s)
     s.canvas.addEventListener('click', (e) => this.on_click(s, e))
-    s.new_game_button.addEventListener('click', (e) => this.new_game(s))
+    s.new_game_button.addEventListener('click', (e) => {
+      let w = parseInt(s.width_select.value)
+      let h = parseInt(s.height_select.value)
+      let wrap = s.wrap_select.checked
+      s.w = w
+      s.h = h
+      s.wrap = wrap
+      this.new_game(s)
+    })
   },
 
   log (s) {
@@ -338,29 +350,41 @@ function new_game (element, opts) {
     element: element,
     w: 6,
     h: 7,
+    wrap: false,
     border_width: 4,
     cell_width: 50,
     field: null,
     active_cell: null,
     clicks: 0,
     time: null,
+    canvas_width: 100,
+    canvas_height: 100
   }
 
-  s.canvas_width = s.w*s.cell_width + s.border_width*2
-  s.canvas_height = s.h*s.cell_width + s.border_width*2
-
-  s.canvas = mkel('canvas', { width: s.canvas_width, height: s.canvas_height })
+  s.canvas = mkel('canvas', {})
   s.element.appendChild(s.canvas)
 
-  let controls = mkel('div')
+  let status = mkel('div', { classes: ['status'] })
+  s.click_counter = mkel('span', { text: '0' })
+  status.appendChild(mkel('span', { text: ' moves: ' }))
+  status.appendChild(s.click_counter)
+  s.time_counter = mkel('span', { text: '0' })
+  status.appendChild(mkel('span', { text: ' time: ' }))
+  status.appendChild(s.time_counter)
+  s.element.appendChild(status)
+
+  let controls = mkel('div', { classes: ['controls'] })
+  s.width_select = mkel('input', { type: 'number', value: s.w, width: 2, min: 1, max: 50 })
+  controls.appendChild(s.width_select)
+  controls.appendChild(mkel('span', { text: 'x' }))
+  s.height_select = mkel('input', { type: 'number', value: s.h, width: 2, min: 1, max: 50 })
+  controls.appendChild(s.height_select)
+  controls.appendChild(mkel('span', { text: ' wrap: ' }))
+  s.wrap_select = mkel('input', { type: 'checkbox', checked: s.wrap })
+  controls.appendChild(s.wrap_select)
+  controls.appendChild(mkel('span', { text: ' ' }))
   s.new_game_button = mkel('button', { text: 'new game' })
   controls.appendChild(s.new_game_button)
-  s.click_counter = mkel('span', { text: '0' })
-  controls.appendChild(mkel('span', { text: ' moves: ' }))
-  controls.appendChild(s.click_counter)
-  s.time_counter = mkel('span', { text: '0' })
-  controls.appendChild(mkel('span', { text: ' time: ' }))
-  controls.appendChild(s.time_counter)
   s.element.appendChild(controls)
 
   return new_object(s, GAME_FUNCS, GAME_API)
