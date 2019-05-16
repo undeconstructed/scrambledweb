@@ -292,8 +292,10 @@ const GAME_FUNCS = {
   },
 
   on_click (s, e) {
-    let x = Math.floor((e.offsetX - s.border_width) / s.cell_width)
-    let y = Math.floor((e.offsetY - s.border_width) / s.cell_width)
+    let scale = s.canvas.offsetWidth / s.canvas_width
+    console.log(scale)
+    let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
+    let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
     s.field.rotate(x, y)
 
     let ac = `${x}.${y}`
