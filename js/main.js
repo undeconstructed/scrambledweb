@@ -395,6 +395,7 @@ const GAME_FUNCS = {
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
     s.clicks = 0
+    s.active_cell = null
     s.time = Date.now()
     this.draw(s, true)
   },
