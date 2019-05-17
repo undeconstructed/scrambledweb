@@ -242,13 +242,6 @@ const GAME_FUNCS = {
     ctx.translate(s.half_cell, s.half_cell)
     ctx.fillStyle = 'rgba(0,255,0,1)'
 
-    for (let y of routes) {
-      if (y) {
-        ctx.fillRect(-2, 0, 4, -s.half_cell)
-      }
-      ctx.rotate(Math.PI/2)
-    }
-
     ctx.beginPath()
     ctx.rect(-10, -10, 20, 20)
     ctx.fill()
@@ -288,13 +281,6 @@ const GAME_FUNCS = {
       ctx.fillStyle = 'rgba(255,0,0,1)'
     }
 
-    for (let y of routes) {
-      if (y) {
-        ctx.fillRect(-2, 0, 4, -s.half_cell)
-      }
-      ctx.rotate(Math.PI/2)
-    }
-
     ctx.beginPath()
     ctx.arc(0, 0, 10, 0, Math.PI * 2, true)
     ctx.fill()
@@ -322,10 +308,12 @@ const GAME_FUNCS = {
 
     switch (cell.type) {
       case 'src':
-        this.drawSrc(s, ctx, cell.routes)
+        this.drawPipe(s, ctx, cell.on, cell.routes)
+        this.drawSrc(s, ctx)
         break
       case 'tgt':
-        this.drawTgt(s, ctx, cell.on, cell.routes)
+        this.drawPipe(s, ctx, cell.on, cell.routes)
+        this.drawTgt(s, ctx, cell.on)
         break
       case 'pipe':
         this.drawPipe(s, ctx, cell.on, cell.routes)
