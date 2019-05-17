@@ -196,7 +196,7 @@ const GAME_FUNCS = {
   drawSrc (s, ctx, routes) {
     ctx.save()
     ctx.translate(s.cell_width/2, s.cell_width/2)
-    ctx.fillStyle = 'rgba(0,0,0,1)'
+    ctx.fillStyle = 'rgba(0,255,0,1)'
 
     for (let y of routes) {
       if (y) {
@@ -206,7 +206,8 @@ const GAME_FUNCS = {
     }
 
     ctx.beginPath()
-    ctx.arc(0, 0, 10, 0, Math.PI * 2, true)
+    // ctx.arc(0, 0, 10, 0, Math.PI * 2, true)
+    ctx.rect(-10, -10, 20, 20)
     ctx.fill()
 
     ctx.restore()
@@ -214,7 +215,11 @@ const GAME_FUNCS = {
   drawPipe (s, ctx, on, routes) {
     ctx.save()
     ctx.translate(s.cell_width/2, s.cell_width/2)
-    ctx.fillStyle = 'rgba(0,0,0,1)'
+    if (on) {
+      ctx.fillStyle = 'rgba(0,255,0,1)'
+    } else {
+      ctx.fillStyle = 'rgba(255,0,0,1)'
+    }
 
     for (let y of routes) {
       if (y) {
@@ -228,7 +233,11 @@ const GAME_FUNCS = {
   drawTgt (s, ctx, on, routes) {
     ctx.save()
     ctx.translate(s.cell_width/2, s.cell_width/2)
-    ctx.fillStyle = 'rgba(255,255,255,1)'
+    if (on) {
+      ctx.fillStyle = 'rgba(0,255,0,1)'
+    } else {
+      ctx.fillStyle = 'rgba(255,0,0,1)'
+    }
 
     for (let y of routes) {
       if (y) {
@@ -245,11 +254,7 @@ const GAME_FUNCS = {
   },
   drawCell (s, ctx, cell) {
     ctx.save()
-    if (cell.on) {
-      ctx.fillStyle = 'rgba(0,255,0,1)'
-    } else {
-      ctx.fillStyle = 'rgba(255,0,0,1)'
-    }
+    ctx.fillStyle = 'rgba(255,255,255,0.1)'
     ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
     switch (cell.type) {
       case 'src':
