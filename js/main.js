@@ -137,7 +137,7 @@ function new_field (w, h, wrap) {
             continue
           }
           cell.routes[i] = false
-          if (FIELD_FUNCS.find_lit(array).size === w*h) {
+          if (FIELD_FUNCS.find_lit(array).size === array.length) {
             changed = true
             if (--can_take > 0)
               continue
@@ -183,10 +183,10 @@ function new_field (w, h, wrap) {
 const GAME_FUNCS = {
   drawBorder (s, ctx) {
     ctx.save()
-    if (s.field.is_won()) {
-      ctx.strokeStyle = 'rgba(0,255,0,1)'
+    if (s.wrap) {
+      ctx.strokeStyle = 'rgba(0,0,0,.2)'
     } else {
-      ctx.strokeStyle = 'rgba(255,0,0,1)'
+      ctx.strokeStyle = 'rgba(0,0,0,1)'
     }
     ctx.lineWidth = s.border_width
     ctx.rect(s.border_width/2, s.border_width/2, s.canvas_width - s.border_width, s.canvas_height - s.border_width)
@@ -213,6 +213,12 @@ const GAME_FUNCS = {
     ctx.restore()
   },
   drawPipe (s, ctx, on, routes) {
+    if (s.hide4s) {
+      if (routes.every(e => e)) {
+        return
+      }
+    }
+
     ctx.save()
     ctx.translate(s.cell_width/2, s.cell_width/2)
     if (on) {
@@ -300,7 +306,6 @@ const GAME_FUNCS = {
 
   on_click (s, e) {
     let scale = s.canvas.offsetWidth / s.canvas_width
-    console.log(scale)
     let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
     let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
     s.field.rotate(x, y)
@@ -309,6 +314,10 @@ const GAME_FUNCS = {
     if (ac !== s.active_cell) {
       s.active_cell = ac
       s.clicks++
+    }
+
+    if (s.field.is_won()) {
+      alert('you won!')
     }
 
     this.draw(s)
@@ -330,12 +339,11 @@ const GAME_FUNCS = {
     this.new_game(s)
     s.canvas.addEventListener('click', (e) => this.on_click(s, e))
     s.new_game_button.addEventListener('click', (e) => {
-      let w = parseInt(s.width_select.value)
-      let h = parseInt(s.height_select.value)
-      let wrap = s.wrap_select.checked
-      s.w = w
-      s.h = h
-      s.wrap = wrap
+      let o = s.mode_select.options[s.mode_select.selectedIndex]
+      s.w = o.w
+      s.h = o.h
+      s.wrap = o.wrap
+      s.hide4s = o.hide4s
       this.new_game(s)
     })
   },
@@ -360,6 +368,7 @@ function new_game (element, opts) {
     w: 6,
     h: 7,
     wrap: false,
+    hide4s: false,
     border_width: 4,
     cell_width: 50,
     field: null,
@@ -383,14 +392,13 @@ function new_game (element, opts) {
   s.element.appendChild(status)
 
   let controls = mkel('div', { classes: ['controls'] })
-  s.width_select = mkel('input', { type: 'number', value: s.w, width: 2, min: 1, max: 50 })
-  controls.appendChild(s.width_select)
-  controls.appendChild(mkel('span', { text: 'x' }))
-  s.height_select = mkel('input', { type: 'number', value: s.h, width: 2, min: 1, max: 50 })
-  controls.appendChild(s.height_select)
-  controls.appendChild(mkel('span', { text: ' wrap: ' }))
-  s.wrap_select = mkel('input', { type: 'checkbox', checked: s.wrap })
-  controls.appendChild(s.wrap_select)
+  s.mode_select = mkel('select')
+  s.mode_select.appendChild(mkel('option', { text: 'novice', w: 6, h: 7, wrap: false, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'normal', w: 10, h: 10, wrap: false, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'expert', w: 8, h: 11, wrap: false, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'master', w: 8, h: 15, wrap: true, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'insane', w: 8, h: 15, wrap: true, hide4s: true }))
+  controls.appendChild(s.mode_select)
   controls.appendChild(mkel('span', { text: ' ' }))
   s.new_game_button = mkel('button', { text: 'new game' })
   controls.appendChild(s.new_game_button)
