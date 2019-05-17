@@ -95,7 +95,8 @@ const FIELD_FUNCS = {
             yield {
               type: c.type,
               on: state.lit.has(c.n),
-              routes: c.routes
+              routes: c.routes,
+              x: c.x, y: c.y
             }
           }
         }
@@ -225,7 +226,7 @@ function new_field (w, h, wrap) {
 const GAME_FUNCS = {
   drawBorder (s, ctx) {
     ctx.save()
-    if (s.wrap) {
+    if (s.settings.wrap) {
       ctx.strokeStyle = 'rgba(0,0,0,.2)'
     } else {
       ctx.strokeStyle = 'rgba(0,0,0,1)'
@@ -238,12 +239,12 @@ const GAME_FUNCS = {
   },
   drawSrc (s, ctx, routes) {
     ctx.save()
-    ctx.translate(s.cell_width/2, s.cell_width/2)
+    ctx.translate(s.half_cell, s.half_cell)
     ctx.fillStyle = 'rgba(0,255,0,1)'
 
     for (let y of routes) {
       if (y) {
-        ctx.fillRect(-2, 0, 4, -s.cell_width/2)
+        ctx.fillRect(-2, 0, 4, -s.half_cell)
       }
       ctx.rotate(Math.PI/2)
     }
@@ -255,14 +256,14 @@ const GAME_FUNCS = {
     ctx.restore()
   },
   drawPipe (s, ctx, on, routes) {
-    if (s.hide4s) {
+    if (s.settings.hide4s) {
       if (routes.every(e => e)) {
         return
       }
     }
 
     ctx.save()
-    ctx.translate(s.cell_width/2, s.cell_width/2)
+    ctx.translate(s.half_cell, s.half_cell)
     if (on) {
       ctx.fillStyle = 'rgba(0,255,0,1)'
     } else {
@@ -271,7 +272,7 @@ const GAME_FUNCS = {
 
     for (let y of routes) {
       if (y) {
-        ctx.fillRect(-2, 0, 4, -s.cell_width/2)
+        ctx.fillRect(-2, 0, 4, -s.half_cell)
       }
       ctx.rotate(Math.PI/2)
     }
@@ -280,7 +281,7 @@ const GAME_FUNCS = {
   },
   drawTgt (s, ctx, on, routes) {
     ctx.save()
-    ctx.translate(s.cell_width/2, s.cell_width/2)
+    ctx.translate(s.half_cell, s.half_cell)
     if (on) {
       ctx.fillStyle = 'rgba(0,255,0,1)'
     } else {
@@ -289,7 +290,7 @@ const GAME_FUNCS = {
 
     for (let y of routes) {
       if (y) {
-        ctx.fillRect(-2, 0, 4, -s.cell_width/2)
+        ctx.fillRect(-2, 0, 4, -s.half_cell)
       }
       ctx.rotate(Math.PI/2)
     }
@@ -300,11 +301,24 @@ const GAME_FUNCS = {
 
     ctx.restore()
   },
-  drawCell (s, ctx, cell) {
+  drawCell (s, ctx, cell, active, now) {
     ctx.save()
+
+    if (active) {
+      ctx.strokeStyle = 'rgba(0,0,0,1)'
+      ctx.setLineDash([5, 15])
+      ctx.strokeRect(0, 0, s.cell_width, s.cell_width)
+
+      if (s.animate > now) {
+        let phase = (now - s.animate) / s.animation_time
+        ctx.translate(s.half_cell, s.half_cell)
+        ctx.rotate((Math.PI / 2) * phase)
+        ctx.translate(-s.half_cell, -s.half_cell)
+      }
+    }
+
     ctx.fillStyle = 'rgba(255,255,255,0.1)'
     ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
-    ctx.restore()
 
     switch (cell.type) {
       case 'src':
@@ -317,13 +331,16 @@ const GAME_FUNCS = {
         this.drawPipe(s, ctx, cell.on, cell.routes)
         break
     }
+
+    ctx.restore()
   },
-  drawCells (s, ctx) {
+  drawCells (s, ctx, now) {
     ctx.save()
     for (let r of s.field.rows()) {
       ctx.save()
-      for (let c of r()) {
-        this.drawCell(s, ctx, c)
+      for (let cell of r()) {
+        let ac = `${cell.x}.${cell.y}`
+        this.drawCell(s, ctx, cell, ac === s.active_cell, now)
         ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
@@ -331,20 +348,23 @@ const GAME_FUNCS = {
     }
     ctx.restore()
   },
-  draw (s) {
-    let ctx = s.canvas.getContext('2d')
-    ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
+  draw (s, force, now) {
+    now = Date.now()
+    // if (s.animate > now || force) {
+      let ctx = s.canvas.getContext('2d')
+      ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
-    ctx.save()
-    this.drawBorder(s, ctx)
-    ctx.translate(s.border_width, s.border_width)
-    this.drawCells(s, ctx)
-    ctx.restore()
+      ctx.save()
+      this.drawBorder(s, ctx)
+      ctx.translate(s.border_width, s.border_width)
+      this.drawCells(s, ctx, now)
+      ctx.restore()
+    // }
 
     s.click_counter.textContent = s.clicks
-    s.time_counter.textContent = Math.round((new Date() - s.time) / 1000)
+    s.time_counter.textContent = Math.round((Date.now() - s.time) / 1000)
 
-    // window.requestAnimationFrame(() => this.draw(s))
+    window.requestAnimationFrame((t) => this.draw(s, false, t))
   },
 
   on_click (s, e) {
@@ -359,7 +379,8 @@ const GAME_FUNCS = {
       s.clicks++
     }
 
-    this.draw(s)
+    s.animate = Date.now() + s.animation_time
+    // this.draw(s)
 
     if (s.field.is_won()) {
       alert('you won!')
@@ -367,25 +388,22 @@ const GAME_FUNCS = {
   },
 
   new_game (s) {
-    s.field = new_field(s.w, s.h, s.wrap)
+    s.field = new_field(s.settings.w, s.settings.h, s.settings.wrap)
     s.field.shuffle()
-    s.canvas_width = s.w*s.cell_width + s.border_width*2
-    s.canvas_height = s.h*s.cell_width + s.border_width*2
+    s.canvas_width = s.settings.w*s.cell_width + s.border_width*2
+    s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
     s.clicks = 0
-    s.time = new Date()
-    this.draw(s)
+    s.time = Date.now()
+    this.draw(s, true)
   },
 
   start (s) {
     let settings = localStorage.getItem('settings')
     if (settings) {
       settings = JSON.parse(settings)
-      s.w = settings.w
-      s.h = settings.h
-      s.wrap = settings.wrap
-      s.hide4s = settings.hide4s
+      s.settings = settings
     }
 
     this.new_game(s)
@@ -395,11 +413,7 @@ const GAME_FUNCS = {
 
       let settings = { w: o.w, h: o.h, wrap: o.wrap, hide4s: o.hides4s }
       localStorage.setItem('settings', JSON.stringify(settings))
-
-      s.w = o.w
-      s.h = o.h
-      s.wrap = o.wrap
-      s.hide4s = o.hide4s
+      s.settings = settings
 
       this.new_game(s)
     })
@@ -421,17 +435,27 @@ const GAME_API = {
 
 function new_game (element, opts) {
   let s = {
+    // from environment
     element: element,
-    w: 6,
-    h: 7,
-    wrap: false,
-    hide4s: false,
+    // config
     border_width: 4,
     cell_width: 50,
+    half_cell: 25,
+    animation_time: 250,
+    // game settings
+    settings: {
+      w: 6,
+      h: 7,
+      wrap: false,
+      hide4s: false
+    },
+    // game state
     field: null,
     active_cell: null,
     clicks: 0,
     time: null,
+    // for drawing
+    animate: 0,
     canvas_width: 100,
     canvas_height: 100
   }
