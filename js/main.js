@@ -311,7 +311,12 @@ const GAME_FUNCS = {
       ctx.strokeStyle = 'rgba(0,0,0,1)'
       ctx.setLineDash([5, 15])
       ctx.strokeRect(0, 0, s.cell_width, s.cell_width)
+    }
 
+    ctx.fillStyle = 'rgba(255,255,255,0.1)'
+    ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
+
+    if (active) {
       if (s.animate > now) {
         let phase = (s.animation_time - (s.animate - now)) / s.animation_time
         ctx.translate(s.half_cell, s.half_cell)
@@ -319,9 +324,6 @@ const GAME_FUNCS = {
         ctx.translate(-s.half_cell, -s.half_cell)
       }
     }
-
-    ctx.fillStyle = 'rgba(255,255,255,0.1)'
-    ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
 
     switch (cell.type) {
       case 'src':
