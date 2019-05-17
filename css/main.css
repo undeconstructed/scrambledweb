@@ -98,10 +98,21 @@ textarea {
    ========================================================================== */
 
 body {
-  padding: 1em;
+  font-family: 'Cantarell', sans-serif;
+  background-color: rgb(118, 145, 158);
+  text-align: center;
+}
+
+h1 {
+  padding: .1em .5em .2em .5em;
+  margin: 0;
+  border-bottom: 4px solid black;
+  background-color: white;
 }
 
 .game {
+  margin: auto;
+  padding: 1em;
 }
 
 .game .controls input[type=number] {
