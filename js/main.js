@@ -68,13 +68,16 @@ const FIELD_FUNCS = {
 
     while (queue.length > 0) {
       let c0 = queue.shift()
+      if (c0.pulled) {
+        continue
+      }
       for (let s = 0; s < 4; s++) {
         if (c0.routes[s]) {
           let nn = c0.neighbours[s]
           if (nn != null) {
             let n = array[nn]
             if (n.routes[opposites[s]]) {
-              if (!lit.has(nn)) {
+              if (!lit.has(nn) && !n.pulled) {
                 lit.add(nn)
                 queue.push(n)
               }
@@ -87,17 +90,13 @@ const FIELD_FUNCS = {
   },
 
   rows (state) {
+    let self = this
     const iter = function* () {
       for (let y = 0; y < state.h; y++) {
         yield function*() {
           for (let x = 0; x < state.w; x++) {
-            let c = state.array[(y * state.w) + x]
-            yield {
-              type: c.type,
-              on: state.lit.has(c.n),
-              routes: c.routes,
-              x: c.x, y: c.y
-            }
+            let cell = state.array[(y * state.w) + x]
+            yield self.public_cell(state, cell)
           }
         }
       }
@@ -115,9 +114,26 @@ const FIELD_FUNCS = {
     state.lit = this.find_lit(state.array)
   },
 
-  rotate (state, x, y) {
+  public_cell (state, cell) {
+    return {
+      type: cell.type,
+      on: state.lit.has(cell.n),
+      routes: cell.routes,
+      x: cell.x, y: cell.y
+    }
+  },
+
+  pull (state, x, y) {
+    let cell = state.array[(y * state.w) + x]
+    cell.pulled = true
+    state.lit = this.find_lit(state.array)
+    return this.public_cell(state, cell)
+  },
+
+  push (state, x, y) {
     let cell = state.array[(y * state.w) + x]
     cell.routes.unshift(cell.routes.pop())
+    cell.pulled = false
     state.lit = this.find_lit(state.array)
   },
 
@@ -129,7 +145,8 @@ const FIELD_FUNCS = {
 const FIELD_API = {
   is_won: {},
   shuffle: {},
-  rotate: {},
+  pull: {},
+  push: {},
   rows: {}
 }
 
@@ -296,7 +313,7 @@ const GAME_FUNCS = {
       ctx.strokeRect(0, 0, s.cell_width, s.cell_width)
 
       if (s.animate > now) {
-        let phase = (now - s.animate) / s.animation_time
+        let phase = (s.animation_time - (s.animate - now)) / s.animation_time
         ctx.translate(s.half_cell, s.half_cell)
         ctx.rotate((Math.PI / 2) * phase)
         ctx.translate(-s.half_cell, -s.half_cell)
@@ -327,8 +344,7 @@ const GAME_FUNCS = {
     for (let r of s.field.rows()) {
       ctx.save()
       for (let cell of r()) {
-        let ac = `${cell.x}.${cell.y}`
-        this.drawCell(s, ctx, cell, ac === s.active_cell, now)
+        this.drawCell(s, ctx, cell, this.is_active_cell(s, cell), now)
         ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
@@ -338,7 +354,7 @@ const GAME_FUNCS = {
   },
   draw (s, force, now) {
     now = Date.now()
-    // if (s.animate > now || force) {
+    if (s.animate > now || force) {
       let ctx = s.canvas.getContext('2d')
       ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
@@ -347,28 +363,38 @@ const GAME_FUNCS = {
       ctx.translate(s.border_width, s.border_width)
       this.drawCells(s, ctx, now)
       ctx.restore()
-    // }
+    }
 
     s.click_counter.textContent = s.clicks
     s.time_counter.textContent = Math.round((Date.now() - s.time) / 1000)
 
-    window.requestAnimationFrame((t) => this.draw(s, false, t))
+    window.requestAnimationFrame((t) => this.draw(s, true, t))
+  },
+
+  is_active_cell (state, cell) {
+    let ac = state.active_cell
+    return ac && ac.x === cell.x && ac.y === cell.y
   },
 
   on_click (s, e) {
+    if (s.animate > Date.now()) {
+      return
+    }
+
     let scale = s.canvas.offsetWidth / s.canvas_width
     let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
     let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
-    s.field.rotate(x, y)
 
-    let ac = `${x}.${y}`
-    if (ac !== s.active_cell) {
-      s.active_cell = ac
+    let cell = s.field.pull(x, y)
+    if (!this.is_active_cell(s, cell)) {
+      s.active_cell = cell
       s.clicks++
     }
 
+    setTimeout(() => {
+      s.field.push(x, y)
+    }, s.animation_time)
     s.animate = Date.now() + s.animation_time
-    // this.draw(s)
 
     if (s.field.is_won()) {
       alert('you won!')
@@ -382,10 +408,10 @@ const GAME_FUNCS = {
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
+
     s.clicks = 0
     s.active_cell = null
     s.time = Date.now()
-    this.draw(s, true)
   },
 
   start (s) {
@@ -406,6 +432,8 @@ const GAME_FUNCS = {
 
       this.new_game(s)
     })
+
+    this.draw(s, true)
   },
 
   log (s) {
