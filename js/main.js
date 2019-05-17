@@ -1,7 +1,37 @@
 
 import { mkel, shuffle } from './util.js'
 
-function new_object (state, fs, api) {
+const OBJECT_META = Symbol('_object')
+
+function serialise (o) {
+  if (o === null) {
+    return null
+  }
+
+  let t = typeof o
+  if (t !== 'object' && t !== 'function') {
+    return o
+  }
+
+  if (o.nodeType > 0) {
+    return null
+  }
+
+  let j = {}
+  if (o[OBJECT_META]) {
+    j._type = o[OBJECT_META].type
+  }
+  if (o.serialise) {
+    o = o.serialise()
+  }
+  for (let f in o) {
+    j[f] = serialise(o[f])
+  }
+  return j
+}
+
+function new_object (state, fs, api, type) {
+  type = type || '?'
   let o = {}
 
   let ms = {}
@@ -15,6 +45,18 @@ function new_object (state, fs, api) {
     let m = fs[f].bind(ms, state)
     o[f] = m
   }
+
+  state[OBJECT_META] = { type }
+
+  if (!o['serialise']) {
+    o['serialise'] = function () {
+      return state
+    }
+  }
+
+  o['toJSON'] = function () {
+    return JSON.stringify(serialise(this))
+  }.bind(o)
 
   return Object.seal(o)
 }
@@ -316,11 +358,11 @@ const GAME_FUNCS = {
       s.clicks++
     }
 
+    this.draw(s)
+
     if (s.field.is_won()) {
       alert('you won!')
     }
-
-    this.draw(s)
   },
 
   new_game (s) {
@@ -336,14 +378,28 @@ const GAME_FUNCS = {
   },
 
   start (s) {
+    let settings = localStorage.getItem('settings')
+    if (settings) {
+      settings = JSON.parse(settings)
+      s.w = settings.w
+      s.h = settings.h
+      s.wrap = settings.wrap
+      s.hide4s = settings.hide4s
+    }
+
     this.new_game(s)
     s.canvas.addEventListener('click', (e) => this.on_click(s, e))
     s.new_game_button.addEventListener('click', (e) => {
       let o = s.mode_select.options[s.mode_select.selectedIndex]
+
+      let settings = { w: o.w, h: o.h, wrap: o.wrap, hide4s: o.hides4s }
+      localStorage.setItem('settings', JSON.stringify(settings))
+
       s.w = o.w
       s.h = o.h
       s.wrap = o.wrap
       s.hide4s = o.hide4s
+
       this.new_game(s)
     })
   },
@@ -411,4 +467,5 @@ document.addEventListener('DOMContentLoaded', e => {
   let game = new_game(document.getElementById('game'))
   game.start()
   // game.log()
+  // console.log(game.toJSON())
 })
