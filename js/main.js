@@ -231,6 +231,7 @@ const GAME_FUNCS = {
       ctx.strokeStyle = 'rgba(0,0,0,1)'
     }
     ctx.lineWidth = s.border_width
+    ctx.beginPath()
     ctx.rect(s.border_width/2, s.border_width/2, s.canvas_width - s.border_width, s.canvas_height - s.border_width)
     ctx.stroke()
     ctx.restore()
@@ -248,7 +249,6 @@ const GAME_FUNCS = {
     }
 
     ctx.beginPath()
-    // ctx.arc(0, 0, 10, 0, Math.PI * 2, true)
     ctx.rect(-10, -10, 20, 20)
     ctx.fill()
 
@@ -304,6 +304,8 @@ const GAME_FUNCS = {
     ctx.save()
     ctx.fillStyle = 'rgba(255,255,255,0.1)'
     ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
+    ctx.restore()
+
     switch (cell.type) {
       case 'src':
         this.drawSrc(s, ctx, cell.routes)
@@ -315,7 +317,6 @@ const GAME_FUNCS = {
         this.drawPipe(s, ctx, cell.on, cell.routes)
         break
     }
-    ctx.restore()
   },
   drawCells (s, ctx) {
     ctx.save()
