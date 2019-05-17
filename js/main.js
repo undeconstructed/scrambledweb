@@ -257,7 +257,7 @@ const GAME_FUNCS = {
   },
   drawPipe (s, ctx, on, routes) {
     if (s.settings.hide4s) {
-      if (routes.every(e => e)) {
+      if (routes.reduce((n, e) => n + (e ? 1 : 0), 0) > 2) {
         return
       }
     }
