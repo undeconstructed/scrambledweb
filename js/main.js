@@ -395,12 +395,12 @@ const GAME_FUNCS = {
 
     setTimeout(() => {
       s.field.push(x, y)
+
+      if (s.field.is_won()) {
+        alert('you won!')
+      }
     }, s.animation_time)
     s.animate = Date.now() + s.animation_time
-
-    if (s.field.is_won()) {
-      alert('you won!')
-    }
   },
 
   new_game (s) {
