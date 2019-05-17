@@ -411,7 +411,7 @@ const GAME_FUNCS = {
     s.new_game_button.addEventListener('click', (e) => {
       let o = s.mode_select.options[s.mode_select.selectedIndex]
 
-      let settings = { w: o.w, h: o.h, wrap: o.wrap, hide4s: o.hides4s }
+      let settings = { w: o.w, h: o.h, wrap: o.wrap, hide4s: o.hide4s }
       localStorage.setItem('settings', JSON.stringify(settings))
       s.settings = settings
 
@@ -475,10 +475,10 @@ function new_game (element, opts) {
   let controls = mkel('div', { classes: ['controls'] })
   s.mode_select = mkel('select')
   s.mode_select.appendChild(mkel('option', { text: 'novice', w: 6, h: 7, wrap: false, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'normal', w: 10, h: 10, wrap: false, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'expert', w: 8, h: 11, wrap: false, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'master', w: 8, h: 15, wrap: true, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'insane', w: 8, h: 15, wrap: true, hide4s: true }))
+  s.mode_select.appendChild(mkel('option', { text: 'normal', w: 8, h: 11, wrap: false, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'expert', w: 8, h: 15, wrap: false, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'master', w: 10, h: 17, wrap: true, hide4s: false }))
+  s.mode_select.appendChild(mkel('option', { text: 'insane', w: 10, h: 17, wrap: true, hide4s: true }))
   controls.appendChild(s.mode_select)
   controls.appendChild(mkel('span', { text: ' ' }))
   s.new_game_button = mkel('button', { text: 'new game' })
