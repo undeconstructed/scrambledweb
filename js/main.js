@@ -421,6 +421,13 @@ const GAME_FUNCS = {
     if (settings) {
       settings = JSON.parse(settings)
       s.settings = settings
+
+      for (let o of s.mode_select.options) {
+        if (settings.w === o.w && settings.h === o.h && settings.wrap === o.wrap && settings.hide4s === o.hide4s) {
+          s.mode_select.value = o.value
+          break
+        }
+      }
     }
 
     this.new_game(s)
