@@ -343,7 +343,7 @@ const GAME_FUNCS = {
   },
   drawCells (s, ctx, now) {
     ctx.save()
-    for (let r of s.field.rows()) {
+    for (let r of s.game.field.rows()) {
       ctx.save()
       for (let cell of r()) {
         this.drawCell(s, ctx, cell, this.is_active_cell(s, cell), now)
@@ -367,14 +367,18 @@ const GAME_FUNCS = {
       ctx.restore()
     }
 
-    s.click_counter.textContent = s.clicks
-    s.time_counter.textContent = Math.round((Date.now() - s.time) / 1000)
+    s.click_counter.textContent = s.game.clicks
+    if (s.game.time < 0) {
+      s.time_counter.textContent = -s.game.time
+    } else {
+      s.time_counter.textContent = Math.round((Date.now() - s.game.time) / 1000)
+    }
 
     window.requestAnimationFrame((t) => this.draw(s, true, t))
   },
 
   is_active_cell (state, cell) {
-    let ac = state.active_cell
+    let ac = state.game.active_cell
     return ac && ac.x === cell.x && ac.y === cell.y
   },
 
@@ -387,16 +391,17 @@ const GAME_FUNCS = {
     let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
     let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
 
-    let cell = s.field.pull(x, y)
+    let cell = s.game.field.pull(x, y)
     if (!this.is_active_cell(s, cell)) {
-      s.active_cell = cell
-      s.clicks++
+      s.game.active_cell = cell
+      s.game.clicks++
     }
 
     setTimeout(() => {
-      s.field.push(x, y)
+      s.game.field.push(x, y)
 
-      if (s.field.is_won()) {
+      if (s.game.field.is_won()) {
+        s.game.time = Math.round((s.game.time - Date.now()) / 1000)
         alert('you won!')
       }
     }, s.animation_time)
@@ -404,16 +409,17 @@ const GAME_FUNCS = {
   },
 
   new_game (s) {
-    s.field = new_field(s.settings.w, s.settings.h, s.settings.wrap)
-    s.field.shuffle()
+    s.game = {
+      field: new_field(s.settings.w, s.settings.h, s.settings.wrap),
+      active_cell: null,
+      clicks: 0,
+      time: Date.now()
+    }
+    s.game.field.shuffle()
     s.canvas_width = s.settings.w*s.cell_width + s.border_width*2
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
-
-    s.clicks = 0
-    s.active_cell = null
-    s.time = Date.now()
   },
 
   start (s) {
@@ -443,20 +449,11 @@ const GAME_FUNCS = {
     })
 
     this.draw(s, true)
-  },
-
-  log (s) {
-    for (let r of s.field.rows()) {
-      for (let c of r()) {
-        console.log(c)
-      }
-    }
   }
 }
 
 const GAME_API = {
-  start: {},
-  log: {}
+  start: {}
 }
 
 function new_game (element, opts) {
@@ -476,10 +473,12 @@ function new_game (element, opts) {
       hide4s: false
     },
     // game state
-    field: null,
-    active_cell: null,
-    clicks: 0,
-    time: null,
+    game: {
+      field: null,
+      active_cell: null,
+      clicks: 0,
+      time: null,
+    },
     // for drawing
     animate: 0,
     canvas_width: 100,
