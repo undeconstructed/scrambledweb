@@ -400,7 +400,7 @@ const GAME_FUNCS = {
     setTimeout(() => {
       s.game.field.push(x, y)
 
-      if (s.game.field.is_won()) {
+      if (s.game.time > 0 && s.game.field.is_won()) {
         s.game.time = Math.round((s.game.time - Date.now()) / 1000)
         alert('you won!')
       }
