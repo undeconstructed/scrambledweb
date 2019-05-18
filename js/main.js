@@ -1,5 +1,5 @@
 
-import { mkel, shuffle } from './util.js'
+import { mkel, shuffle, isInStandaloneMode } from './util.js'
 
 const OBJECT_META = Symbol('_object')
 
@@ -515,8 +515,10 @@ function new_game (element, opts) {
 }
 
 document.addEventListener('DOMContentLoaded', e => {
+  if (isInStandaloneMode()) {
+    document.body.classList.add('standalone')
+  }
   let game = new_game(document.getElementById('game'))
   game.start()
-  // game.log()
   // console.log(game.toJSON())
 })
