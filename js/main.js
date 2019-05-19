@@ -61,6 +61,45 @@ function new_object (state, fs, api, type) {
   return Object.seal(o)
 }
 
+const STATS_FUNCS = {
+  post (state, mode, obj) {
+    let res = []
+
+    let best = state.bests[mode] || {}
+    for (let s in obj) {
+      if (best[s] === undefined || obj[s] > best[s]) {
+        best[s] = obj[s]
+        res.push(s)
+      }
+    }
+    state.bests[mode] = best
+    localStorage.setItem('stats', JSON.stringify(state))
+
+    return res
+  },
+  getBests (state) {
+    return state.bests
+  }
+}
+
+const STATS_API = {
+  post: {},
+  getBests: {}
+}
+
+function new_stats () {
+  let state = {
+    bests: {}
+  }
+
+  let fromStore = localStorage.getItem('stats')
+  if (fromStore) {
+    state = JSON.parse(fromStore)
+  }
+
+  return new_object(state, STATS_FUNCS, STATS_API)
+}
+
 const FIELD_FUNCS = {
   find_lit (array) {
     let queue = array.filter(e => e.type === 'src')
@@ -240,6 +279,15 @@ function new_field (w, h, wrap) {
   return new_object(state, FIELD_FUNCS, FIELD_API)
 }
 
+const GAME_MODES = [
+  // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
+  { mode: 'novice', w: 6, h: 7, wrap: false, hide4s: false },
+  { mode: 'normal', w: 8, h: 11, wrap: false, hide4s: false },
+  { mode: 'expert', w: 8, h: 15, wrap: false, hide4s: false },
+  { mode: 'master', w: 10, h: 17, wrap: true, hide4s: false },
+  { mode: 'insane', w: 10, h: 17, wrap: true, hide4s: true }
+]
+
 const GAME_FUNCS = {
   drawBorder (s, ctx) {
     ctx.save()
@@ -402,7 +450,17 @@ const GAME_FUNCS = {
 
       if (s.game.time > 0 && s.game.field.is_won()) {
         s.game.time = Math.round((s.game.time - Date.now()) / 1000)
-        alert('you won!')
+        let bests = s.stats.post(s.settings.mode, {
+          time: s.game.time,
+          moves: -s.game.clicks
+        })
+        let msg = `you won in ${-s.game.time} seconds using ${s.game.clicks} moves!`
+        if (bests.length === 1) {
+          msg += `\nthat\'s your best ${bests[0]}!`
+        } else if (bests.length === 2) {
+          msg += `\nthat\'s your best ${bests[0]} and ${bests[1]}!`
+        }
+        alert(msg)
       }
     }, s.animation_time)
     s.animate = Date.now() + s.animation_time
@@ -423,25 +481,28 @@ const GAME_FUNCS = {
   },
 
   start (s) {
+    for (let settings of GAME_MODES) {
+      let o = mkel('option', { text: settings.mode, settings: settings })
+      s.mode_select.appendChild(o)
+    }
+
     let settings = localStorage.getItem('settings')
     if (settings) {
       settings = JSON.parse(settings)
       s.settings = settings
+      s.mode_select.value = settings.mode
 
-      for (let o of s.mode_select.options) {
-        if (settings.w === o.w && settings.h === o.h && settings.wrap === o.wrap && settings.hide4s === o.hide4s) {
-          s.mode_select.value = o.value
-          break
-        }
+      if (!s.mode_select.value) {
+        let o = mkel('option', { text: 'custom', settings: settings })
+        s.mode_select.appendChild(o)
+        s.mode_select.value = 'custom'
       }
     }
 
     this.new_game(s)
     s.canvas.addEventListener('click', (e) => this.on_click(s, e))
     s.new_game_button.addEventListener('click', (e) => {
-      let o = s.mode_select.options[s.mode_select.selectedIndex]
-
-      let settings = { w: o.w, h: o.h, wrap: o.wrap, hide4s: o.hide4s }
+      let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
       localStorage.setItem('settings', JSON.stringify(settings))
       s.settings = settings
 
@@ -456,10 +517,11 @@ const GAME_API = {
   start: {}
 }
 
-function new_game (element, opts) {
+function new_game (element, stats) {
   let s = {
     // from environment
     element: element,
+    stats: stats,
     // config
     border_width: 4,
     cell_width: 50,
@@ -467,6 +529,7 @@ function new_game (element, opts) {
     animation_time: 250,
     // game settings
     settings: {
+      mode: 'novice',
       w: 6,
       h: 7,
       wrap: false,
@@ -499,11 +562,6 @@ function new_game (element, opts) {
 
   let controls = mkel('div', { classes: ['controls'] })
   s.mode_select = mkel('select')
-  s.mode_select.appendChild(mkel('option', { text: 'novice', w: 6, h: 7, wrap: false, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'normal', w: 8, h: 11, wrap: false, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'expert', w: 8, h: 15, wrap: false, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'master', w: 10, h: 17, wrap: true, hide4s: false }))
-  s.mode_select.appendChild(mkel('option', { text: 'insane', w: 10, h: 17, wrap: true, hide4s: true }))
   controls.appendChild(s.mode_select)
   controls.appendChild(mkel('span', { text: ' ' }))
   s.new_game_button = mkel('button', { text: 'new game' })
@@ -517,7 +575,8 @@ document.addEventListener('DOMContentLoaded', e => {
   if (isInStandaloneMode()) {
     document.body.classList.add('standalone')
   }
-  let game = new_game(document.getElementById('game'))
+  let stats = new_stats()
+  let game = new_game(document.getElementById('game'), stats)
   game.start()
   // console.log(game.toJSON())
 })
