@@ -115,8 +115,12 @@ h1 {
   padding: 1em;
 }
 
-.game .controls input[type=number] {
-  width: 3em;
+.game .status {
+  margin: .5em 0;
+}
+
+.game .controls input, .game .controls button, .game .controls select {
+  height: 2em;
 }
 
 body.standalone {
