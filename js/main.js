@@ -1,5 +1,5 @@
 
-import { mkel, shuffle, isInStandaloneMode } from './util.js'
+import { mkel, shuffle, isInStandaloneMode, isInFullscreenMode } from './util.js'
 
 const OBJECT_META = Symbol('_object')
 
@@ -572,7 +572,7 @@ function new_game (element, stats) {
 }
 
 document.addEventListener('DOMContentLoaded', e => {
-  if (isInStandaloneMode()) {
+  if (isInStandaloneMode() || isInFullscreenMode()) {
     document.body.classList.add('standalone')
   }
   let stats = new_stats()

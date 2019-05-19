@@ -64,3 +64,6 @@ export function shuffle (array) {
 export function isInStandaloneMode () {
   return window.matchMedia('(display-mode: standalone)').matches || (window.navigator.standalone)
 }
+export function isInFullscreenMode () {
+  return window.matchMedia('(display-mode: fullscreen)').matches || (window.navigator.fullscreen)
+}
