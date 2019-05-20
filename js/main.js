@@ -1,5 +1,5 @@
 
-import { mkel, shuffle, isInStandaloneMode, isInFullscreenMode } from './util.js'
+import { join, mkel, shuffle, isInStandaloneMode, isInFullscreenMode } from './util.js'
 
 const OBJECT_META = Symbol('_object')
 
@@ -155,6 +155,7 @@ const FIELD_FUNCS = {
 
   public_cell (state, cell) {
     return {
+      id: cell.n,
       type: cell.type,
       on: state.lit.has(cell.n),
       routes: cell.routes,
@@ -164,6 +165,9 @@ const FIELD_FUNCS = {
 
   pull (state, x, y) {
     let cell = state.array[(y * state.w) + x]
+    if (cell.pulled) {
+      return null
+    }
     cell.pulled = true
     state.lit = this.find_lit(state.array)
     return this.public_cell(state, cell)
@@ -352,7 +356,7 @@ const GAME_FUNCS = {
 
     ctx.restore()
   },
-  drawCell (s, ctx, cell, active, now) {
+  drawCell (s, ctx, cell, moving, active, now) {
     ctx.save()
 
     if (active) {
@@ -364,13 +368,10 @@ const GAME_FUNCS = {
     ctx.fillStyle = 'rgba(255,255,255,0.1)'
     ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
 
-    if (active) {
-      if (s.animate > now) {
-        let phase = (s.animation_time - (s.animate - now)) / s.animation_time
-        ctx.translate(s.half_cell, s.half_cell)
-        ctx.rotate((Math.PI / 2) * phase)
-        ctx.translate(-s.half_cell, -s.half_cell)
-      }
+    if (moving) {
+      ctx.translate(s.half_cell, s.half_cell)
+      ctx.rotate((Math.PI / 2) * moving.phase)
+      ctx.translate(-s.half_cell, -s.half_cell)
     }
 
     switch (cell.type) {
@@ -394,7 +395,8 @@ const GAME_FUNCS = {
     for (let r of s.game.field.rows()) {
       ctx.save()
       for (let cell of r()) {
-        this.drawCell(s, ctx, cell, this.is_active_cell(s, cell), now)
+        let moving = s.movings.get(cell.id)
+        this.drawCell(s, ctx, cell, moving, this.is_active_cell(s, cell), now)
         ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
@@ -402,9 +404,21 @@ const GAME_FUNCS = {
     }
     ctx.restore()
   },
-  draw (s, force, now) {
-    now = Date.now()
-    if (s.animate > now || force) {
+  draw (s) {
+    let now = Date.now()
+
+    if (s.movings.size > 0) {
+      for (let k of s.movings.keys()) {
+        let m = s.movings.get(k)
+        m.phase = (now - m.start) / s.animation_time
+        if (m.phase > 1) {
+          if (m.after) {
+            m.after()
+          }
+          s.movings.delete(k)
+        }
+      }
+
       let ctx = s.canvas.getContext('2d')
       ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
@@ -419,51 +433,56 @@ const GAME_FUNCS = {
     if (s.game.time < 0) {
       s.time_counter.textContent = -s.game.time
     } else {
-      s.time_counter.textContent = Math.round((Date.now() - s.game.time) / 1000)
+      s.time_counter.textContent = Math.round((now - s.game.time) / 1000)
     }
 
-    window.requestAnimationFrame((t) => this.draw(s, true, t))
+    window.requestAnimationFrame((t) => this.draw(s))
   },
 
   is_active_cell (state, cell) {
     let ac = state.game.active_cell
-    return ac && ac.x === cell.x && ac.y === cell.y
+    return ac && ac.id === cell.id
   },
 
   on_click (s, e) {
-    if (s.animate > Date.now()) {
-      return
-    }
-
     let scale = s.canvas.offsetWidth / s.canvas_width
     let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
     let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
 
     let cell = s.game.field.pull(x, y)
+    if (!cell) {
+      return
+    }
     if (!this.is_active_cell(s, cell)) {
       s.game.active_cell = cell
       s.game.clicks++
     }
 
-    setTimeout(() => {
-      s.game.field.push(x, y)
-
-      if (s.game.time > 0 && s.game.field.is_won()) {
-        s.game.time = Math.round((s.game.time - Date.now()) / 1000)
-        let bests = s.stats.post(s.settings.mode, {
-          time: s.game.time,
-          moves: -s.game.clicks
-        })
-        let msg = `you won in ${-s.game.time} seconds using ${s.game.clicks} moves!`
-        if (bests.length === 1) {
-          msg += `\nthat\'s your best ${bests[0]}!`
-        } else if (bests.length === 2) {
-          msg += `\nthat\'s your best ${bests[0]} and ${bests[1]}!`
-        }
-        alert(msg)
+    let check_win = this.check_win
+    s.movings.set(cell.id, {
+      start: Date.now(),
+      after: function () {
+        s.game.field.push(x, y)
+        setTimeout(function () {
+          check_win(s)
+        }, 0)
       }
-    }, s.animation_time)
-    s.animate = Date.now() + s.animation_time
+    })
+  },
+
+  check_win (s) {
+    if (s.game.time > 0 && s.game.field.is_won()) {
+      s.game.time = Math.round((s.game.time - Date.now()) / 1000)
+      let bests = s.stats.post(s.settings.mode, {
+        time: s.game.time,
+        moves: -s.game.clicks
+      })
+      let msg = `you won in ${-s.game.time} seconds using ${s.game.clicks} moves!`
+      if (bests.length > 0) {
+        msg += `\nthat\'s your best ${join(bests, ' and ')}!`
+      }
+      alert(msg)
+    }
   },
 
   new_game (s) {
@@ -478,6 +497,7 @@ const GAME_FUNCS = {
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
+    s.movings.set(0, { start: 0 })
   },
 
   start (s) {
@@ -509,7 +529,7 @@ const GAME_FUNCS = {
       this.new_game(s)
     })
 
-    this.draw(s, true)
+    this.draw(s)
   }
 }
 
@@ -543,7 +563,7 @@ function new_game (element, stats) {
       time: null,
     },
     // for drawing
-    animate: 0,
+    movings: new Map(),
     canvas_width: 100,
     canvas_height: 100
   }
