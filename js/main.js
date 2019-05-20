@@ -69,7 +69,7 @@ function new_object (state, ms, api, type) {
   return Object.seal(o)
 }
 
-const STATS_FUNCS = {
+const Stats = make_class('stats', {
   post (state, mode, obj) {
     let res = []
 
@@ -88,14 +88,10 @@ const STATS_FUNCS = {
   getBests (state) {
     return state.bests
   }
-}
-
-const STATS_API = {
+}, {
   post: {},
   getBests: {}
-}
-
-let Stats = make_class('stats', STATS_FUNCS, STATS_API)
+})
 
 function new_stats () {
   let state = {
@@ -110,7 +106,7 @@ function new_stats () {
   return Stats.new(state)
 }
 
-const FIELD_FUNCS = {
+const Field = make_class('field', {
   find_lit (array) {
     let queue = array.filter(e => e.type === 'src')
     let lit = new Set(queue.map(e => e.n))
@@ -193,17 +189,13 @@ const FIELD_FUNCS = {
   is_won (state) {
     return state.tgts.every(e => state.lit.has(e.n))
   }
-}
-
-const FIELD_API = {
+}, {
   is_won: {},
   shuffle: {},
   pull: {},
   push: {},
   rows: {}
-}
-
-let Field = make_class('field', FIELD_FUNCS, FIELD_API)
+})
 
 // t, r, b, l => b, l, t, r
 const opposites = [ 2, 3, 0, 1 ]
@@ -252,7 +244,7 @@ function new_field (w, h, wrap) {
             continue
           }
           cell.routes[i] = false
-          if (FIELD_FUNCS.find_lit(array).size === array.length) {
+          if (Field.static.find_lit(array).size === array.length) {
             changed = true
             if (--can_take > 0)
               continue
@@ -304,7 +296,7 @@ const GAME_MODES = [
   { mode: 'insane', w: 10, h: 17, wrap: true, hide4s: true }
 ]
 
-const GAME_FUNCS = {
+const Game = make_class('game', {
   drawBorder (s, ctx) {
     ctx.save()
     if (s.settings.wrap) {
@@ -543,13 +535,9 @@ const GAME_FUNCS = {
 
     this.draw(s)
   }
-}
-
-const GAME_API = {
+}, {
   start: {}
-}
-
-let Game = make_class('game', GAME_FUNCS, GAME_API)
+})
 
 function new_game (element, stats) {
   let s = {
