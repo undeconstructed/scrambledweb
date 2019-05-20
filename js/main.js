@@ -3,6 +3,22 @@ import { join, mkel, shuffle, isInStandaloneMode, isInFullscreenMode } from './u
 
 const OBJECT_META = Symbol('_object')
 
+function make_class (name, fs, api) {
+  let ms = {}
+  for (let f in fs) {
+    let m = fs[f].bind(ms)
+    ms[f] = m
+  }
+  ms = Object.seal(ms)
+
+  return Object.seal({
+    static: ms,
+    new (state) {
+      return new_object(state, ms, api, name)
+    }
+  })
+}
+
 function serialise (o) {
   if (o === null) {
     return null
@@ -30,20 +46,12 @@ function serialise (o) {
   return j
 }
 
-function new_object (state, fs, api, type) {
-  type = type || '?'
+function new_object (state, ms, api, type) {
   let o = {}
 
-  let ms = {}
-  for (let f in fs) {
-    let m = fs[f].bind(ms)
-    ms[f] = m
-  }
-
-  for (let f in api) {
-    // let spec = pub[m]
-    let m = fs[f].bind(ms, state)
-    o[f] = m
+  for (let m in api) {
+    let a = ms[m].bind(ms, state)
+    o[m] = a
   }
 
   state[OBJECT_META] = { type }
@@ -87,6 +95,8 @@ const STATS_API = {
   getBests: {}
 }
 
+let Stats = make_class('stats', STATS_FUNCS, STATS_API)
+
 function new_stats () {
   let state = {
     bests: {}
@@ -97,7 +107,7 @@ function new_stats () {
     state = JSON.parse(fromStore)
   }
 
-  return new_object(state, STATS_FUNCS, STATS_API)
+  return Stats.new(state)
 }
 
 const FIELD_FUNCS = {
@@ -193,6 +203,8 @@ const FIELD_API = {
   rows: {}
 }
 
+let Field = make_class('field', FIELD_FUNCS, FIELD_API)
+
 // t, r, b, l => b, l, t, r
 const opposites = [ 2, 3, 0, 1 ]
 
@@ -278,9 +290,9 @@ function new_field (w, h, wrap) {
   state.array = array
   state.src = src
   state.tgts = tgts
-  state.lit = FIELD_FUNCS.find_lit(array)
+  state.lit = Field.static.find_lit(array)
 
-  return new_object(state, FIELD_FUNCS, FIELD_API)
+  return Field.new(state)
 }
 
 const GAME_MODES = [
@@ -537,6 +549,8 @@ const GAME_API = {
   start: {}
 }
 
+let Game = make_class('game', GAME_FUNCS, GAME_API)
+
 function new_game (element, stats) {
   let s = {
     // from environment
@@ -588,7 +602,7 @@ function new_game (element, stats) {
   controls.appendChild(s.new_game_button)
   s.element.appendChild(controls)
 
-  return new_object(s, GAME_FUNCS, GAME_API)
+  return Game.new(s)
 }
 
 document.addEventListener('DOMContentLoaded', e => {
