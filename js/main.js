@@ -169,6 +169,11 @@ const Field = make_class('field', {
     }
   },
 
+  examine (state, x, y) {
+    let cell = state.array[(y * state.w) + x]
+    return this.public_cell(state, cell)
+  },
+
   pull (state, x, y) {
     let cell = state.array[(y * state.w) + x]
     if (cell.pulled) {
@@ -192,6 +197,7 @@ const Field = make_class('field', {
 }, {
   is_won: {},
   shuffle: {},
+  examine: {},
   pull: {},
   push: {},
   rows: {}
@@ -454,24 +460,36 @@ const Game = make_class('game', {
     let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
 
     let cell = s.game.field.pull(x, y)
-    if (!cell) {
-      return
+    if (cell) {
+      this.start_spin(s, cell, 1)
+    } else {
+      cell = s.game.field.examine(x, y)
+      s.movings.get(cell.id).times++
     }
+
     if (!this.is_active_cell(s, cell)) {
       s.game.active_cell = cell
       s.game.clicks++
     }
+  },
 
-    let check_win = this.check_win
-    s.movings.set(cell.id, {
+  start_spin (s, cell, times) {
+    let m = {
       start: Date.now(),
+      times: times,
       after: function () {
-        s.game.field.push(x, y)
+        let times = this.times
+        s.game.field.push(cell.x, cell.y)
         setTimeout(function () {
-          check_win(s)
+          Game.static.check_win(s)
+          if (times > 1) {
+            s.game.field.pull(cell.x, cell.y)
+            Game.static.start_spin(s, cell, times-1)
+          }
         }, 0)
       }
-    })
+    }
+    s.movings.set(cell.id, m)
   },
 
   check_win (s) {
@@ -502,6 +520,28 @@ const Game = make_class('game', {
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
     s.movings.set(0, { start: 0 })
+  },
+
+  setup (s) {
+    s.canvas = mkel('canvas', {})
+    s.element.appendChild(s.canvas)
+
+    let status = mkel('div', { classes: ['status'] })
+    s.click_counter = mkel('span', { text: '0' })
+    status.appendChild(mkel('span', { text: ' moves: ' }))
+    status.appendChild(s.click_counter)
+    s.time_counter = mkel('span', { text: '0' })
+    status.appendChild(mkel('span', { text: ' time: ' }))
+    status.appendChild(s.time_counter)
+    s.element.appendChild(status)
+
+    let controls = mkel('div', { classes: ['controls'] })
+    s.mode_select = mkel('select')
+    controls.appendChild(s.mode_select)
+    controls.appendChild(mkel('span', { text: ' ' }))
+    s.new_game_button = mkel('button', { text: 'new game' })
+    controls.appendChild(s.new_game_button)
+    s.element.appendChild(controls)
   },
 
   start (s) {
@@ -570,25 +610,7 @@ function new_game (element, stats) {
     canvas_height: 100
   }
 
-  s.canvas = mkel('canvas', {})
-  s.element.appendChild(s.canvas)
-
-  let status = mkel('div', { classes: ['status'] })
-  s.click_counter = mkel('span', { text: '0' })
-  status.appendChild(mkel('span', { text: ' moves: ' }))
-  status.appendChild(s.click_counter)
-  s.time_counter = mkel('span', { text: '0' })
-  status.appendChild(mkel('span', { text: ' time: ' }))
-  status.appendChild(s.time_counter)
-  s.element.appendChild(status)
-
-  let controls = mkel('div', { classes: ['controls'] })
-  s.mode_select = mkel('select')
-  controls.appendChild(s.mode_select)
-  controls.appendChild(mkel('span', { text: ' ' }))
-  s.new_game_button = mkel('button', { text: 'new game' })
-  controls.appendChild(s.new_game_button)
-  s.element.appendChild(controls)
+  Game.static.setup(s)
 
   return Game.new(s)
 }
