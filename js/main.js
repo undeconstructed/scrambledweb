@@ -579,6 +579,10 @@ const Game = make_class('game', {
     this.draw(s)
   },
 
+  pause (s, p) {
+    console.log(`${p ? '' : 'un'}pause`)
+  },
+
   solve (s) {
     s.cheat = true
     for (let r of s.game.field.solution()) {
@@ -591,6 +595,7 @@ const Game = make_class('game', {
   }
 }, {
   start: {},
+  pause: {},
   solve: {}
 })
 
@@ -650,6 +655,12 @@ const Controller = make_class('controller', {
     s.solve_button.addEventListener('click', (e) => {
       s.game.solve()
     })
+  },
+
+  setup_events (s) {
+    document.addEventListener('visibilitychange', e => {
+      s.game.pause(document.hidden)
+    })
   }
 }, {})
 
@@ -659,6 +670,7 @@ function new_controller (element, settings, game) {
   }
 
   Controller.static.setup_elements(s, element)
+  Controller.static.setup_events(s)
 
   s.mode_select.value = settings.mode
   if (!s.mode_select.value) {
