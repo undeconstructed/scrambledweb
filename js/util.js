@@ -67,3 +67,38 @@ export function isInStandaloneMode () {
 export function isInFullscreenMode () {
   return window.matchMedia('(display-mode: fullscreen)').matches || (window.navigator.fullscreen)
 }
+export function isProbablyInstalled () {
+  return isInFullscreenMode() || isInStandaloneMode()
+}
+
+export function defer (delay, func, args) {
+  return setTimeout(function () {
+    return func(...args)
+  })
+}
+
+export function hook (src, event, options, func, args) {
+  return src.addEventListener(event, function (e) {
+    return func(e, ...args)
+  }, options)
+}
+
+export function animate (func, args) {
+  window.requestAnimationFrame(function() {
+    func(...args)
+  })
+}
+
+export function select (parent, selector) {
+  return parent.querySelector(selector)
+}
+
+export function main(func) {
+  document.addEventListener('DOMContentLoaded', function() {
+    func({
+      window,
+      document,
+      localStorage
+    })
+  })
+}

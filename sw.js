@@ -9,6 +9,7 @@ self.addEventListener('install', function(e) {
        'icon.png',
        'css/normalize.css',
        'css/main.css',
+       'js/classis.js',
        'js/main.js',
        'js/util.js'
      ]);
@@ -17,7 +18,6 @@ self.addEventListener('install', function(e) {
 });
 
 self.addEventListener('fetch', function(e) {
-  // console.log(e.request.url);
   e.respondWith(
     caches.match(e.request).then(function(response) {
       return response || fetch(e.request);

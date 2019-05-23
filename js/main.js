@@ -1,75 +1,24 @@
 
-import { join, mkel, shuffle, isInStandaloneMode, isInFullscreenMode } from './util.js'
+import { make_class } from './classis.js'
+import { join, mkel, shuffle, isProbablyInstalled, hook, select, defer, animate, main } from './util.js'
 
-const OBJECT_META = Symbol('_object')
-
-function make_class (name, fs, api) {
-  let ms = {}
-  for (let f in fs) {
-    let m = fs[f].bind(ms)
-    ms[f] = m
-  }
-  ms = Object.seal(ms)
-
-  return Object.seal({
-    static: ms,
-    new (state) {
-      return new_object(state, ms, api, name)
-    }
-  })
-}
-
-function serialise (o) {
-  if (o === null) {
-    return null
-  }
-
-  let t = typeof o
-  if (t !== 'object' && t !== 'function') {
-    return o
-  }
-
-  if (o.nodeType > 0) {
-    return null
-  }
-
-  let j = {}
-  if (o[OBJECT_META]) {
-    j._type = o[OBJECT_META].type
-  }
-  if (o.serialise) {
-    o = o.serialise()
-  }
-  for (let f in o) {
-    j[f] = serialise(o[f])
-  }
-  return j
-}
-
-function new_object (state, ms, api, type) {
-  let o = {}
-
-  for (let m in api) {
-    let a = ms[m].bind(ms, state)
-    o[m] = a
-  }
-
-  state[OBJECT_META] = { type }
-
-  if (!o['serialise']) {
-    o['serialise'] = function () {
-      return state
-    }
-  }
-
-  o['toJSON'] = function () {
-    return JSON.stringify(serialise(this))
-  }.bind(o)
-
-  return Object.seal(o)
-}
+const GAME_MODES = [
+  // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
+  { mode: 'novice', w: 6, h: 7, wrap: false, hide4s: false },
+  { mode: 'normal', w: 8, h: 11, wrap: false, hide4s: false },
+  { mode: 'expert', w: 8, h: 15, wrap: false, hide4s: false },
+  { mode: 'master', w: 10, h: 17, wrap: true, hide4s: false },
+  { mode: 'insane', w: 10, h: 17, wrap: true, hide4s: true }
+]
 
 const Stats = make_class('stats', {
+  load (state) {
+    let fromStore = state.localStorage.getItem('stats')
+    if (fromStore) {
+      state.bests = JSON.parse(fromStore)
+    }
+  },
+
   post (state, mode, obj) {
     let res = []
 
@@ -81,10 +30,11 @@ const Stats = make_class('stats', {
       }
     }
     state.bests[mode] = best
-    localStorage.setItem('stats', JSON.stringify(state))
+    state.localStorage.setItem('stats', JSON.stringify(state.bests))
 
     return res
   },
+
   getBests (state) {
     return state.bests
   }
@@ -93,15 +43,13 @@ const Stats = make_class('stats', {
   getBests: {}
 })
 
-function new_stats () {
+function new_stats (localStorage) {
   let state = {
+    localStorage: localStorage,
     bests: {}
   }
 
-  let fromStore = localStorage.getItem('stats')
-  if (fromStore) {
-    state = JSON.parse(fromStore)
-  }
+  Stats.static.load(state)
 
   return Stats.new(state)
 }
@@ -321,15 +269,6 @@ function new_field (w, h, wrap) {
   return Field.new(state)
 }
 
-const GAME_MODES = [
-  // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
-  { mode: 'novice', w: 6, h: 7, wrap: false, hide4s: false },
-  { mode: 'normal', w: 8, h: 11, wrap: false, hide4s: false },
-  { mode: 'expert', w: 8, h: 15, wrap: false, hide4s: false },
-  { mode: 'master', w: 10, h: 17, wrap: true, hide4s: false },
-  { mode: 'insane', w: 10, h: 17, wrap: true, hide4s: true }
-]
-
 const Game = make_class('game', {
   drawBorder (s, ctx) {
     ctx.save()
@@ -450,10 +389,10 @@ const Game = make_class('game', {
         let m = s.movings.get(k)
         m.phase = (now - m.start) / s.animation_time
         if (m.phase > 1) {
-          if (m.after) {
-            m.after()
-          }
           s.movings.delete(k)
+          if (m.cell) {
+            this.after_animate(s, m)
+          }
         }
       }
 
@@ -474,7 +413,7 @@ const Game = make_class('game', {
       s.time_counter.textContent = Math.round((now - s.game.time) / 1000)
     }
 
-    window.requestAnimationFrame((t) => this.draw(s))
+    animate(this.draw, [s])
   },
 
   is_active_cell (state, cell) {
@@ -482,7 +421,7 @@ const Game = make_class('game', {
     return ac && ac.id === cell.id
   },
 
-  on_click (s, e) {
+  on_click (e, s) {
     let scale = s.canvas.offsetWidth / s.canvas_width
     let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
     let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
@@ -502,22 +441,22 @@ const Game = make_class('game', {
   },
 
   start_spin (s, cell, times) {
-    let m = {
+    s.movings.set(cell.id, {
       start: Date.now(),
-      times: times,
-      after: function () {
-        let times = this.times
-        s.game.field.push(cell.x, cell.y)
-        setTimeout(function () {
-          Game.static.check_win(s)
-          if (times > 1) {
-            s.game.field.pull(cell.x, cell.y)
-            Game.static.start_spin(s, cell, times-1)
-          }
-        }, 0)
-      }
+      cell: cell,
+      times: times
+    })
+  },
+
+  after_animate (s, m) {
+    let {cell, times} = m
+    s.game.field.push(cell.x, cell.y)
+
+    this.check_win(s)
+    if (times > 1) {
+      s.game.field.pull(cell.x, cell.y)
+      this.start_spin(s, cell, times-1)
     }
-    s.movings.set(cell.id, m)
   },
 
   check_win (s) {
@@ -575,12 +514,12 @@ const Game = make_class('game', {
   start (s, settings) {
     s.settings = settings
     this.new_game(s)
-    s.canvas.addEventListener('click', (e) => this.on_click(s, e))
+    hook(s.canvas, 'click', {}, this.on_click, [s])
     this.draw(s)
   },
 
   pause (s, p) {
-    console.log(`${p ? '' : 'un'}pause`)
+    // console.log(`${p ? '' : 'un'}pause`)
   },
 
   solve (s) {
@@ -630,6 +569,22 @@ function new_game (element, stats) {
 }
 
 const Controller = make_class('controller', {
+  load (state) {
+    let settings = localStorage.getItem('settings')
+    if (settings) {
+      settings = JSON.parse(settings)
+    } else {
+      settings = {
+        mode: 'novice',
+        w: 6,
+        h: 7,
+        wrap: false,
+        hide4s: false
+      }
+    }
+    state.settings = settings
+  },
+
   setup_elements (s, parent) {
     let controls = mkel('div', { classes: ['controls'] })
     s.mode_select = mkel('select')
@@ -647,64 +602,62 @@ const Controller = make_class('controller', {
       s.mode_select.appendChild(o)
     }
 
-    s.new_game_button.addEventListener('click', (e) => {
-      let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
-      localStorage.setItem('settings', JSON.stringify(settings))
-      s.game.start(settings)
-    })
-    s.solve_button.addEventListener('click', (e) => {
-      s.game.solve()
-    })
+    s.mode_select.value = s.settings.mode
+    if (!s.mode_select.value) {
+      let o = mkel('option', { text: 'custom', settings: s.settings })
+      s.mode_select.appendChild(o)
+      s.mode_select.value = 'custom'
+    }
   },
 
   setup_events (s) {
-    document.addEventListener('visibilitychange', e => {
-      s.game.pause(document.hidden)
-    })
-  }
-}, {})
+    hook(s.document, 'visibilitychange', {}, this.on_showhide, [s])
+    hook(s.new_game_button, 'click', {},this.on_new_game_click, [s])
+    hook(s.solve_button, 'click', {}, this.on_solve_click, [s])
+  },
 
-function new_controller (element, settings, game) {
+  on_showhide (e, s) {
+    s.game.pause(s.document.hidden)
+  },
+  on_new_game_click (e, s) {
+    let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
+    s.localStorage.setItem('settings', JSON.stringify(settings))
+    s.game.start(settings)
+  },
+  on_solve_click (e, s) {
+    s.game.solve()
+  },
+
+  start (state) {
+    state.game.start(state.settings)
+  }
+}, {
+  start: {}
+})
+
+function new_controller (element, document, localStorage, game, stats) {
   let s = {
-    game
+    document,
+    localStorage,
+    game,
+    stats
   }
 
+  Controller.static.load(s)
   Controller.static.setup_elements(s, element)
   Controller.static.setup_events(s)
-
-  s.mode_select.value = settings.mode
-  if (!s.mode_select.value) {
-    let o = mkel('option', { text: 'custom', settings: settings })
-    s.mode_select.appendChild(o)
-    s.mode_select.value = 'custom'
-  }
 
   return Controller.new(s)
 }
 
-function main () {
-  if (isInStandaloneMode() || isInFullscreenMode()) {
+main(function ({window, document, localStorage}) {
+  if (isProbablyInstalled()) {
     document.body.classList.add('standalone')
   }
 
-  let settings = localStorage.getItem('settings')
-  if (settings) {
-    settings = JSON.parse(settings)
-  } else {
-    settings = {
-      mode: 'novice',
-      w: 6,
-      h: 7,
-      wrap: false,
-      hide4s: false
-    }
-  }
+  let stats = new_stats(localStorage)
+  let game = new_game(select(document, '#game'), stats)
+  let controller = new_controller(select(document, '#game'), document, localStorage, game, stats)
 
-  let stats = new_stats()
-  let game = new_game(document.getElementById('game'), stats)
-  let controller = new_controller(document.getElementById('game'), settings, game)
-
-  game.start(settings)
-}
-
-document.addEventListener('DOMContentLoaded', main)
+  controller.start()
+})
