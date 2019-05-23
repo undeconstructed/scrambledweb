@@ -149,11 +149,16 @@ const Field = make_class('field', {
     return iter()
   },
 
+  turn_cell (cell) {
+    cell.routes.unshift(cell.routes.pop())
+    cell.turns = (cell.turns + 1) % 4
+  },
+
   shuffle (state) {
     for (let cell of state.array) {
       let n = Math.random()*4
       for (let r = 0; r < n; r++) {
-        cell.routes.unshift(cell.routes.pop())
+        this.turn_cell(cell)
       }
     }
     state.lit = this.find_lit(state.array)
@@ -165,7 +170,8 @@ const Field = make_class('field', {
       type: cell.type,
       on: state.lit.has(cell.n),
       routes: cell.routes,
-      x: cell.x, y: cell.y
+      x: cell.x,
+      y: cell.y
     }
   },
 
@@ -186,13 +192,33 @@ const Field = make_class('field', {
 
   push (state, x, y) {
     let cell = state.array[(y * state.w) + x]
-    cell.routes.unshift(cell.routes.pop())
+    this.turn_cell(cell)
     cell.pulled = false
     state.lit = this.find_lit(state.array)
   },
 
   is_won (state) {
     return state.tgts.every(e => state.lit.has(e.n))
+  },
+
+  solution (state) {
+    let self = this
+    const iter = function* () {
+      for (let y = 0; y < state.h; y++) {
+        yield function*() {
+          for (let x = 0; x < state.w; x++) {
+            let cell = state.array[(y * state.w) + x]
+            yield {
+              id: cell.n,
+              x: cell.x,
+              y: cell.y,
+              turn: (!cell.turns ? 0 : 4 - cell.turns)
+            }
+          }
+        }
+      }
+    }
+    return iter()
   }
 }, {
   is_won: {},
@@ -200,7 +226,8 @@ const Field = make_class('field', {
   examine: {},
   pull: {},
   push: {},
-  rows: {}
+  rows: {},
+  solution: {},
 })
 
 // t, r, b, l => b, l, t, r
@@ -224,9 +251,10 @@ function new_field (w, h, wrap) {
       let neighbours = [ t, r, b, l ]
 
       let type = 'pipe'
+      let turns = 0
       let routes = [ t !== null, r !== null, b !== null, l !== null ]
 
-      array[n] = { n, x, y, type, routes, neighbours }
+      array[n] = { n, x, y, type, routes, turns, neighbours }
     }
   }
 
@@ -493,7 +521,11 @@ const Game = make_class('game', {
   },
 
   check_win (s) {
+    if (s.cheat) {
+      return
+    }
     if (s.game.time > 0 && s.game.field.is_won()) {
+      s.settings.hide4s = false
       s.game.time = Math.round((s.game.time - Date.now()) / 1000)
       let bests = s.stats.post(s.settings.mode, {
         time: s.game.time,
@@ -505,6 +537,10 @@ const Game = make_class('game', {
       }
       alert(msg)
     }
+  },
+
+  force_draw (s) {
+    s.movings.set(-1, { start: 0 })
   },
 
   new_game (s) {
@@ -519,12 +555,12 @@ const Game = make_class('game', {
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
-    s.movings.set(0, { start: 0 })
+    this.force_draw(s)
   },
 
-  setup (s) {
+  setup_elements (s, parent) {
     s.canvas = mkel('canvas', {})
-    s.element.appendChild(s.canvas)
+    parent.appendChild(s.canvas)
 
     let status = mkel('div', { classes: ['status'] })
     s.click_counter = mkel('span', { text: '0' })
@@ -533,56 +569,34 @@ const Game = make_class('game', {
     s.time_counter = mkel('span', { text: '0' })
     status.appendChild(mkel('span', { text: ' time: ' }))
     status.appendChild(s.time_counter)
-    s.element.appendChild(status)
-
-    let controls = mkel('div', { classes: ['controls'] })
-    s.mode_select = mkel('select')
-    controls.appendChild(s.mode_select)
-    controls.appendChild(mkel('span', { text: ' ' }))
-    s.new_game_button = mkel('button', { text: 'new game' })
-    controls.appendChild(s.new_game_button)
-    s.element.appendChild(controls)
+    parent.appendChild(status)
   },
 
-  start (s) {
-    for (let settings of GAME_MODES) {
-      let o = mkel('option', { text: settings.mode, settings: settings })
-      s.mode_select.appendChild(o)
-    }
-
-    let settings = localStorage.getItem('settings')
-    if (settings) {
-      settings = JSON.parse(settings)
-      s.settings = settings
-      s.mode_select.value = settings.mode
-
-      if (!s.mode_select.value) {
-        let o = mkel('option', { text: 'custom', settings: settings })
-        s.mode_select.appendChild(o)
-        s.mode_select.value = 'custom'
-      }
-    }
-
+  start (s, settings) {
+    s.settings = settings
     this.new_game(s)
     s.canvas.addEventListener('click', (e) => this.on_click(s, e))
-    s.new_game_button.addEventListener('click', (e) => {
-      let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
-      localStorage.setItem('settings', JSON.stringify(settings))
-      s.settings = settings
-
-      this.new_game(s)
-    })
-
     this.draw(s)
+  },
+
+  solve (s) {
+    s.cheat = true
+    for (let r of s.game.field.solution()) {
+      for (let cell of r()) {
+        if (cell.turn) {
+          this.start_spin(s, cell, cell.turn)
+        }
+      }
+    }
   }
 }, {
-  start: {}
+  start: {},
+  solve: {}
 })
 
 function new_game (element, stats) {
   let s = {
     // from environment
-    element: element,
     stats: stats,
     // config
     border_width: 4,
@@ -590,19 +604,14 @@ function new_game (element, stats) {
     half_cell: 25,
     animation_time: 250,
     // game settings
-    settings: {
-      mode: 'novice',
-      w: 6,
-      h: 7,
-      wrap: false,
-      hide4s: false
-    },
+    settings: null,
     // game state
     game: {
       field: null,
       active_cell: null,
       clicks: 0,
       time: null,
+      cheat: false
     },
     // for drawing
     movings: new Map(),
@@ -610,17 +619,80 @@ function new_game (element, stats) {
     canvas_height: 100
   }
 
-  Game.static.setup(s)
+  Game.static.setup_elements(s, element)
 
   return Game.new(s)
 }
 
-document.addEventListener('DOMContentLoaded', e => {
+const Controller = make_class('controller', {
+  setup_elements (s, parent) {
+    let controls = mkel('div', { classes: ['controls'] })
+    s.mode_select = mkel('select')
+    controls.appendChild(s.mode_select)
+    controls.appendChild(mkel('span', { text: ' ' }))
+    s.new_game_button = mkel('button', { text: 'new game' })
+    controls.appendChild(s.new_game_button)
+    controls.appendChild(mkel('span', { text: ' | ' }))
+    s.solve_button = mkel('button', { text: 'solve' })
+    controls.appendChild(s.solve_button)
+    parent.appendChild(controls)
+
+    for (let settings of GAME_MODES) {
+      let o = mkel('option', { text: settings.mode, settings: settings })
+      s.mode_select.appendChild(o)
+    }
+
+    s.new_game_button.addEventListener('click', (e) => {
+      let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
+      localStorage.setItem('settings', JSON.stringify(settings))
+      s.game.start(settings)
+    })
+    s.solve_button.addEventListener('click', (e) => {
+      s.game.solve()
+    })
+  }
+}, {})
+
+function new_controller (element, settings, game) {
+  let s = {
+    game
+  }
+
+  Controller.static.setup_elements(s, element)
+
+  s.mode_select.value = settings.mode
+  if (!s.mode_select.value) {
+    let o = mkel('option', { text: 'custom', settings: settings })
+    s.mode_select.appendChild(o)
+    s.mode_select.value = 'custom'
+  }
+
+  return Controller.new(s)
+}
+
+function main () {
   if (isInStandaloneMode() || isInFullscreenMode()) {
     document.body.classList.add('standalone')
   }
+
+  let settings = localStorage.getItem('settings')
+  if (settings) {
+    settings = JSON.parse(settings)
+  } else {
+    settings = {
+      mode: 'novice',
+      w: 6,
+      h: 7,
+      wrap: false,
+      hide4s: false
+    }
+  }
+
   let stats = new_stats()
   let game = new_game(document.getElementById('game'), stats)
-  game.start()
-  // console.log(game.toJSON())
-})
+  let controller = new_controller(document.getElementById('game'), settings, game)
+
+  game.start(settings)
+}
+
+document.addEventListener('DOMContentLoaded', main)
