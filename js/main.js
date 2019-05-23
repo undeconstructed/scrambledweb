@@ -309,6 +309,9 @@ const Game = make_class('game', {
       ctx.fillStyle = 'rgba(255,0,0,1)'
     }
 
+    ctx.beginPath()
+    ctx.arc(0, 0, 4, 0, Math.PI * 2, true)
+    ctx.fill()
     for (let y of routes) {
       if (y) {
         ctx.fillRect(-2, 0, 4, -s.half_cell)
