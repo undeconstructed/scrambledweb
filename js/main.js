@@ -270,6 +270,24 @@ function new_field (w, h, wrap) {
 }
 
 const Game = make_class('game', {
+  setup_elements (s, parent) {
+    s.canvas = mkel('canvas', {})
+    parent.appendChild(s.canvas)
+
+    let status = mkel('div', { classes: ['status'] })
+    s.click_counter = mkel('span', { text: '0' })
+    status.appendChild(mkel('span', { text: ' moves: ' }))
+    status.appendChild(s.click_counter)
+    s.time_counter = mkel('span', { text: '0' })
+    status.appendChild(mkel('span', { text: ' time: ' }))
+    status.appendChild(s.time_counter)
+    parent.appendChild(status)
+  },
+
+  setup_events (s) {
+    hook(s.canvas, 'click', {}, this.on_click, [s])
+  },
+
   drawBorder (s, ctx) {
     ctx.save()
     if (s.settings.wrap) {
@@ -310,7 +328,7 @@ const Game = make_class('game', {
     }
 
     ctx.beginPath()
-    ctx.arc(0, 0, 4, 0, Math.PI * 2, true)
+    ctx.arc(0, 0, 2, 0, Math.PI * 2, true)
     ctx.fill()
     for (let y of routes) {
       if (y) {
@@ -500,24 +518,9 @@ const Game = make_class('game', {
     this.force_draw(s)
   },
 
-  setup_elements (s, parent) {
-    s.canvas = mkel('canvas', {})
-    parent.appendChild(s.canvas)
-
-    let status = mkel('div', { classes: ['status'] })
-    s.click_counter = mkel('span', { text: '0' })
-    status.appendChild(mkel('span', { text: ' moves: ' }))
-    status.appendChild(s.click_counter)
-    s.time_counter = mkel('span', { text: '0' })
-    status.appendChild(mkel('span', { text: ' time: ' }))
-    status.appendChild(s.time_counter)
-    parent.appendChild(status)
-  },
-
   start (s, settings) {
     s.settings = settings
     this.new_game(s)
-    hook(s.canvas, 'click', {}, this.on_click, [s])
     this.draw(s)
   },
 
@@ -537,6 +540,7 @@ const Game = make_class('game', {
   }
 }, {
   start: {},
+  new_game: {},
   pause: {},
   solve: {}
 })
@@ -567,6 +571,7 @@ function new_game (element, stats) {
   }
 
   Game.static.setup_elements(s, element)
+  Game.static.setup_events(s)
 
   return Game.new(s)
 }
@@ -625,7 +630,8 @@ const Controller = make_class('controller', {
   on_new_game_click (e, s) {
     let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
     s.localStorage.setItem('settings', JSON.stringify(settings))
-    s.game.start(settings)
+    s.game.new_game(settings)
+    s.settings = settings
   },
   on_solve_click (e, s) {
     s.game.solve()

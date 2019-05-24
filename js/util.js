@@ -93,7 +93,7 @@ export function select (parent, selector) {
   return parent.querySelector(selector)
 }
 
-export function main(func) {
+export function main (func) {
   document.addEventListener('DOMContentLoaded', function() {
     func({
       window,
