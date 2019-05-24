@@ -123,6 +123,11 @@ h1 {
   height: 2em;
 }
 
+.instructions {
+  margin: auto;
+  max-width: 20em;
+}
+
 body.standalone {
   background-color: black;
   display: flex;
@@ -144,6 +149,10 @@ body.standalone .gameframe {
 
 body.standalone .game canvas {
   width: 100%;
+}
+
+body.standalone .instructions {
+  display: none;
 }
 
 /* ==========================================================================
