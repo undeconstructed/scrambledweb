@@ -474,6 +474,7 @@ const Game = make_class('game', {
     s.game.field.push(cell.x, cell.y)
 
     this.check_win(s)
+
     if (times > 1) {
       s.game.field.pull(cell.x, cell.y)
       this.start_spin(s, cell, times-1)
@@ -495,7 +496,7 @@ const Game = make_class('game', {
       if (bests.length > 0) {
         msg += `\nthat\'s your best ${join(bests, ' and ')}!`
       }
-      alert(msg)
+      defer(0, alert, [msg])
     }
   },
 
