@@ -503,7 +503,8 @@ const Game = make_class('game', {
     s.movings.set(-1, { start: 0 })
   },
 
-  new_game (s) {
+  new_game (s, settings) {
+    s.settings = settings
     s.game = {
       field: new_field(s.settings.w, s.settings.h, s.settings.wrap),
       active_cell: null,
@@ -515,12 +516,12 @@ const Game = make_class('game', {
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
+    s.movings = new Map()
     this.force_draw(s)
   },
 
   start (s, settings) {
-    s.settings = settings
-    this.new_game(s)
+    this.new_game(s, settings)
     this.draw(s)
   },
 
@@ -582,13 +583,7 @@ const Controller = make_class('controller', {
     if (settings) {
       settings = JSON.parse(settings)
     } else {
-      settings = {
-        mode: 'novice',
-        w: 6,
-        h: 7,
-        wrap: false,
-        hide4s: false
-      }
+      settings = GAME_MODES[0]
     }
     state.settings = settings
   },
@@ -630,8 +625,8 @@ const Controller = make_class('controller', {
   on_new_game_click (e, s) {
     let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
     s.localStorage.setItem('settings', JSON.stringify(settings))
-    s.game.new_game(settings)
     s.settings = settings
+    s.game.new_game(settings)
   },
   on_solve_click (e, s) {
     s.game.solve()
