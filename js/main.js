@@ -313,7 +313,7 @@ const Game = make_class('game', {
     ctx.restore()
   },
   draw_pipe (s, ctx, on, routes) {
-    if (s.settings.hide4s) {
+    if (s.settings.hide4s && !s.game.won && !s.game.cheated) {
       if (routes.reduce((n, e) => n + (e ? 1 : 0), 0) > 2) {
         return
       }
@@ -447,7 +447,7 @@ const Game = make_class('game', {
 
   seconds_gone (game) {
     let t = game.acc_time
-    if (!game.paused && !game.cheated && !game.won) {
+    if (!game.paused && !game.won) {
       t += Date.now() - game.time
     }
     return Math.round(t / 1000)
@@ -552,7 +552,7 @@ const Game = make_class('game', {
 
   pause (s, p) {
     if (p) {
-      if (s.game.paused || s.game.won || s.game.cheated) {
+      if (s.game.paused || s.game.won) {
         return
       }
       s.game.acc_time += (Date.now() - s.game.time)
