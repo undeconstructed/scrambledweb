@@ -288,7 +288,7 @@ const Game = make_class('game', {
     hook(s.canvas, 'click', {}, this.on_click, [s])
   },
 
-  drawBorder (s, ctx) {
+  draw_border (s, ctx) {
     ctx.save()
     if (s.settings.wrap) {
       ctx.strokeStyle = 'rgba(0,0,0,.2)'
@@ -301,7 +301,7 @@ const Game = make_class('game', {
     ctx.stroke()
     ctx.restore()
   },
-  drawSrc (s, ctx, routes) {
+  draw_src (s, ctx, routes) {
     ctx.save()
     ctx.translate(s.half_cell, s.half_cell)
     ctx.fillStyle = 'rgba(0,255,0,1)'
@@ -312,7 +312,7 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  drawPipe (s, ctx, on, routes) {
+  draw_pipe (s, ctx, on, routes) {
     if (s.settings.hide4s) {
       if (routes.reduce((n, e) => n + (e ? 1 : 0), 0) > 2) {
         return
@@ -339,7 +339,7 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  drawTgt (s, ctx, on, routes) {
+  draw_tgt (s, ctx, on, routes) {
     ctx.save()
     ctx.translate(s.half_cell, s.half_cell)
     if (on) {
@@ -354,7 +354,7 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  drawCell (s, ctx, cell, moving, active, now) {
+  draw_cell (s, ctx, cell, moving, active, now) {
     ctx.save()
 
     if (active) {
@@ -374,27 +374,27 @@ const Game = make_class('game', {
 
     switch (cell.type) {
       case 'src':
-        this.drawPipe(s, ctx, cell.on, cell.routes)
-        this.drawSrc(s, ctx)
+        this.draw_pipe(s, ctx, cell.on, cell.routes)
+        this.draw_src(s, ctx)
         break
       case 'tgt':
-        this.drawPipe(s, ctx, cell.on, cell.routes)
-        this.drawTgt(s, ctx, cell.on)
+        this.draw_pipe(s, ctx, cell.on, cell.routes)
+        this.draw_tgt(s, ctx, cell.on)
         break
       case 'pipe':
-        this.drawPipe(s, ctx, cell.on, cell.routes)
+        this.draw_pipe(s, ctx, cell.on, cell.routes)
         break
     }
 
     ctx.restore()
   },
-  drawCells (s, ctx, now) {
+  draw_cells (s, ctx, now) {
     ctx.save()
     for (let r of s.game.field.rows()) {
       ctx.save()
       for (let cell of r()) {
         let moving = s.movings.get(cell.id)
-        this.drawCell(s, ctx, cell, moving, this.is_active_cell(s, cell), now)
+        this.draw_cell(s, ctx, cell, moving, this.is_active_cell(s, cell), now)
         ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
@@ -405,7 +405,9 @@ const Game = make_class('game', {
   draw (s) {
     let now = Date.now()
 
-    if (s.movings.size > 0) {
+    if (s.force_draw || s.movings.size > 0) {
+      s.force_draw = false
+
       for (let k of s.movings.keys()) {
         let m = s.movings.get(k)
         m.phase = (now - m.start) / s.animation_time
@@ -421,18 +423,19 @@ const Game = make_class('game', {
       ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
       ctx.save()
-      this.drawBorder(s, ctx)
-      ctx.translate(s.border_width, s.border_width)
-      this.drawCells(s, ctx, now)
+      if (!s.game.paused) {
+        this.draw_border(s, ctx)
+        ctx.translate(s.border_width, s.border_width)
+        this.draw_cells(s, ctx, now)
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.3)'
+        ctx.fillRect(0, 0, s.canvas_width, s.canvas_height)
+      }
       ctx.restore()
     }
 
     s.click_counter.textContent = s.game.clicks
-    if (s.game.time < 0) {
-      s.time_counter.textContent = -s.game.time
-    } else {
-      s.time_counter.textContent = Math.round((now - s.game.time) / 1000)
-    }
+    s.time_counter.textContent = this.seconds_gone(s.game)
 
     animate(this.draw, [s])
   },
@@ -440,6 +443,14 @@ const Game = make_class('game', {
   is_active_cell (state, cell) {
     let ac = state.game.active_cell
     return ac && ac.id === cell.id
+  },
+
+  seconds_gone (game) {
+    let t = game.acc_time
+    if (!game.paused && !game.cheated && !game.won) {
+      t += Date.now() - game.time
+    }
+    return Math.round(t / 1000)
   },
 
   on_click (e, s) {
@@ -473,7 +484,10 @@ const Game = make_class('game', {
     let {cell, times} = m
     s.game.field.push(cell.x, cell.y)
 
-    this.check_win(s)
+    if (this.check_win(s.game)) {
+      s.game.won = true
+      defer(0, this.on_win, [s])
+    }
 
     if (times > 1) {
       s.game.field.pull(cell.x, cell.y)
@@ -481,27 +495,33 @@ const Game = make_class('game', {
     }
   },
 
-  check_win (s) {
-    if (s.cheat) {
-      return
+  check_win (game) {
+    if (game.cheated || game.won) {
+      return false
     }
-    if (s.game.time > 0 && s.game.field.is_won()) {
-      s.settings.hide4s = false
-      s.game.time = Math.round((s.game.time - Date.now()) / 1000)
-      let bests = s.stats.post(s.settings.mode, {
-        time: s.game.time,
-        moves: -s.game.clicks
-      })
-      let msg = `you won in ${-s.game.time} seconds using ${s.game.clicks} moves!`
-      if (bests.length > 0) {
-        msg += `\nthat\'s your best ${join(bests, ' and ')}!`
-      }
-      defer(0, alert, [msg])
+    if (game.field.is_won()) {
+      return true
     }
+    return false
   },
 
-  force_draw (s) {
-    s.movings.set(-1, { start: 0 })
+  on_win (s) {
+    s.game.acc_time = (Date.now() - s.game.time)
+
+    let time = Math.round(s.game.acc_time / 1000)
+    let clicks = s.game.clicks
+
+    let bests = s.stats.post(s.settings.mode, {
+      time: -time,
+      moves: -clicks
+    })
+
+    let msg = `you won in ${time} seconds using ${clicks} moves!`
+    if (bests.length > 0) {
+      msg += `\nthat\'s your best ${join(bests, ' and ')}!`
+    }
+
+    defer(0, alert, [msg])
   },
 
   new_game (s, settings) {
@@ -510,7 +530,11 @@ const Game = make_class('game', {
       field: new_field(s.settings.w, s.settings.h, s.settings.wrap),
       active_cell: null,
       clicks: 0,
-      time: Date.now()
+      time: Date.now(),
+      acc_time: 0,
+      won: false,
+      paused: false,
+      cheated: false
     }
     s.game.field.shuffle()
     s.canvas_width = s.settings.w*s.cell_width + s.border_width*2
@@ -518,20 +542,33 @@ const Game = make_class('game', {
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
     s.movings = new Map()
-    this.force_draw(s)
+    s.force_draw = true
   },
 
   start (s, settings) {
     this.new_game(s, settings)
-    this.draw(s)
+    animate(this.draw, [s])
   },
 
   pause (s, p) {
-    // console.log(`${p ? '' : 'un'}pause`)
+    if (p) {
+      if (s.game.paused || s.game.won || s.game.cheated) {
+        return
+      }
+      s.game.acc_time += (Date.now() - s.game.time)
+      s.game.paused = true
+    } else {
+      if (!s.game.paused) {
+        return
+      }
+      s.game.time = Date.now()
+      s.game.paused = false
+    }
+    s.force_draw = true
   },
 
   solve (s) {
-    s.cheat = true
+    s.game.cheated = true
     for (let r of s.game.field.solution()) {
       for (let cell of r()) {
         if (cell.turn) {
@@ -559,13 +596,7 @@ function new_game (element, stats) {
     // game settings
     settings: null,
     // game state
-    game: {
-      field: null,
-      active_cell: null,
-      clicks: 0,
-      time: null,
-      cheat: false
-    },
+    game: null,
     // for drawing
     movings: new Map(),
     canvas_width: 100,
@@ -599,6 +630,8 @@ const Controller = make_class('controller', {
     controls.appendChild(mkel('span', { text: ' | ' }))
     s.solve_button = mkel('button', { text: 'solve' })
     controls.appendChild(s.solve_button)
+    // s.help_button = mkel('a', { text: '?' })
+    // controls.appendChild(s.help_button)
     parent.appendChild(controls)
 
     for (let settings of GAME_MODES) {
@@ -615,13 +648,18 @@ const Controller = make_class('controller', {
   },
 
   setup_events (s) {
-    hook(s.document, 'visibilitychange', {}, this.on_showhide, [s])
-    hook(s.new_game_button, 'click', {},this.on_new_game_click, [s])
+    // hook(s.document, 'visibilitychange', {}, this.on_showhide, [s])
+    hook(s.document, 'focus', {}, this.on_focus, [s])
+    hook(s.document, 'blur', {}, this.on_focus, [s])
+    hook(s.new_game_button, 'click', {}, this.on_new_game_click, [s])
     hook(s.solve_button, 'click', {}, this.on_solve_click, [s])
   },
 
   on_showhide (e, s) {
     s.game.pause(s.document.hidden)
+  },
+  on_focus (e, s) {
+    s.game.pause(e.type === 'blur')
   },
   on_new_game_click (e, s) {
     let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
