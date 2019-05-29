@@ -110,6 +110,13 @@ h1 {
   background-color: white;
 }
 
+h1 .version {
+  display: block;
+  opacity: 0.2;
+  font-size: 30%;
+  height: 1em;
+}
+
 .game {
   margin: auto;
   padding: 1em;
