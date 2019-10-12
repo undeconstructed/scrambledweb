@@ -66,3 +66,68 @@ function new_object (state, ms, api, type) {
 
   return Object.seal(o)
 }
+
+const Channel = make_class('channel', {
+  send (state, msg) {
+    if (state.hook) {
+      this.run_hook(state, msg)
+      return true
+    }
+    if (state.array.length < state.cap) {
+      state.array.push(msg)
+      return true
+    }
+    return false
+  },
+  recv () {
+    return state.array.unshift()
+  },
+  hook (state, func, args) {
+    state.hook = {
+      func, args
+    }
+    let e = state.array.unshift()
+    if (e) {
+      this.run_hook(state, e)
+    }
+  },
+  run_hook (state, e) {
+    let hook = state.hook
+    setTimeout(function () {
+      hook.func(e, ...hook.args)
+    }, 0)
+    state.hook = null
+  }
+}, {
+  send: {},
+  recv: {},
+  hook: {}
+})
+
+export function make_channel (cap) {
+  cap = cap === undefined ? 10000 : cap
+  let array = []
+  return Channel.new({
+    cap,
+    array
+  })
+}
+
+export function run_proc (gen) {
+  let ctx = {
+    on: function (chans) {
+      let yon = chans
+      let cb = function (e, chan) {
+        if (yon !== null) {
+          proc.next([chan, e])
+          yon = null
+        }
+      }
+      for (let chan of chans) {
+        chan.hook(cb, [chan])
+      }
+    }
+  }
+
+  let proc = gen(ctx)
+}

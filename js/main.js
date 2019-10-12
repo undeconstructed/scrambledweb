@@ -1,9 +1,9 @@
 
-import { make_class } from './classis.js'
+import { make_class, make_channel } from './classis.js'
 import { join, mkel, shuffle, isProbablyInstalled, hook, select, defer, animate, main } from './util.js'
 
 const GAME_MODES = [
-  // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
+  { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
   { mode: 'novice', w: 6, h: 7, wrap: false, hide4s: false },
   { mode: 'normal', w: 8, h: 11, wrap: false, hide4s: false },
   { mode: 'expert', w: 8, h: 15, wrap: false, hide4s: false },
@@ -439,8 +439,6 @@ const Game = make_class('game', {
 
     s.click_counter.textContent = s.game.clicks
     s.time_counter.textContent = this.seconds_gone(s.game)
-
-    animate(this.draw, [s])
   },
 
   is_active_cell (state, cell) {
@@ -512,19 +510,12 @@ const Game = make_class('game', {
     s.game.acc_time = (Date.now() - s.game.time)
 
     let time = Math.round(s.game.acc_time / 1000)
-    let clicks = s.game.clicks
+    let moves = s.game.clicks
 
-    let bests = s.stats.post(s.settings.mode, {
-      time: -time,
-      moves: -clicks
+    s.channel.send({
+      event: 'win',
+      stats: { time, moves }
     })
-
-    let msg = `you won in ${time} seconds using ${clicks} moves!`
-    if (bests.length > 0) {
-      msg += `\nthat\'s your best ${join(bests, ' and ')}!`
-    }
-
-    defer(0, alert, [msg])
   },
 
   new_game (s, settings) {
@@ -550,7 +541,6 @@ const Game = make_class('game', {
 
   start (s, settings) {
     this.new_game(s, settings)
-    animate(this.draw, [s])
   },
 
   pause (s, p) {
@@ -579,18 +569,23 @@ const Game = make_class('game', {
         }
       }
     }
+  },
+
+  channel (s) {
+    return s.channel
   }
 }, {
   start: {},
   new_game: {},
   pause: {},
-  solve: {}
+  solve: {},
+  draw: {},
+  channel: {},
 })
 
-function new_game (element, stats) {
+function new_game (element) {
+  let channel = make_channel()
   let s = {
-    // from environment
-    stats: stats,
     // config
     border_width: 4,
     cell_width: 50,
@@ -600,6 +595,7 @@ function new_game (element, stats) {
     settings: null,
     // game state
     game: null,
+    channel: channel,
     // for drawing
     movings: new Map(),
     canvas_width: 100,
@@ -674,8 +670,34 @@ const Controller = make_class('controller', {
     s.game.solve()
   },
 
+  on_game_event (e, state) {
+    if (e.event === 'win') {
+      let win = e.stats
+      let bests = state.stats.post(state.settings.mode, {
+        time: -win.time,
+        moves: -win.moves
+      })
+
+      let msg = `you won in ${win.time} seconds using ${win.moves} moves!`
+      if (bests.length > 0) {
+        msg += `\nthat\'s your best ${join(bests, ' and ')}!`
+      }
+
+      defer(0, alert, [msg])
+    }
+
+    state.game.channel().hook(this.on_game_event, [state])
+  },
+
   start (state) {
+    state.game.channel().hook(this.on_game_event, [state])
     state.game.start(state.settings)
+    animate(this.draw, [state])
+  },
+
+  draw (state) {
+    state.game.draw()
+    animate(this.draw, [state])
   }
 }, {
   start: {}
@@ -686,7 +708,8 @@ function new_controller (element, document, localStorage, game, stats) {
     document,
     localStorage,
     game,
-    stats
+    stats,
+    settings: null,
   }
 
   Controller.static.load(s)
@@ -702,7 +725,7 @@ main(function ({window, document, localStorage}) {
   }
 
   let stats = new_stats(localStorage)
-  let game = new_game(select(document, '#game'), stats)
+  let game = new_game(select(document, '#game'))
   let controller = new_controller(select(document, '#game'), document, localStorage, game, stats)
 
   controller.start()
