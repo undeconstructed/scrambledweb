@@ -11,6 +11,9 @@ const GAME_MODES = [
   { mode: 'insane', w: 10, h: 17, wrap: true, hide4s: true }
 ]
 
+const COLOR_ON = 'rgba(50,250,50,1)'
+const COLOR_OFF = 'rgba(150,50,50,1)'
+
 const Stats = make_class('stats', {
   load (state) {
     let fromStore = state.localStorage.getItem('stats')
@@ -35,12 +38,12 @@ const Stats = make_class('stats', {
     return res
   },
 
-  getBests (state) {
+  get_bests (state) {
     return state.bests
   }
 }, {
   post: {},
-  getBests: {}
+  get_bests: {}
 })
 
 function new_stats (localStorage) {
@@ -304,7 +307,7 @@ const Game = make_class('game', {
   draw_src (s, ctx, routes) {
     ctx.save()
     ctx.translate(s.half_cell, s.half_cell)
-    ctx.fillStyle = 'rgba(0,255,0,1)'
+    ctx.fillStyle = COLOR_ON
 
     ctx.beginPath()
     ctx.rect(-10, -10, 20, 20)
@@ -322,9 +325,9 @@ const Game = make_class('game', {
     ctx.save()
     ctx.translate(s.half_cell, s.half_cell)
     if (on) {
-      ctx.fillStyle = 'rgba(0,255,0,1)'
+      ctx.fillStyle = COLOR_ON
     } else {
-      ctx.fillStyle = 'rgba(255,0,0,1)'
+      ctx.fillStyle = COLOR_OFF
     }
 
     ctx.beginPath()
@@ -343,9 +346,9 @@ const Game = make_class('game', {
     ctx.save()
     ctx.translate(s.half_cell, s.half_cell)
     if (on) {
-      ctx.fillStyle = 'rgba(0,255,0,1)'
+      ctx.fillStyle = COLOR_ON
     } else {
-      ctx.fillStyle = 'rgba(255,0,0,1)'
+      ctx.fillStyle = COLOR_OFF
     }
 
     ctx.beginPath()
