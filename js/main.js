@@ -1,6 +1,38 @@
 
-import { make_class, make_channel } from './classis.js'
+import { make_class, make_channel, run_proc } from './classis.js'
 import { join, mkel, shuffle, isProbablyInstalled, hook, select, defer, animate, main } from './util.js'
+
+function hook_chan(source, event, chan, options) {
+  options = options || {}
+  options.tag = options.tag || event
+
+  return hook(source, event, options, function (xe) {
+    let e = {
+      tag: options.tag,
+      type: xe.type
+    }
+
+    switch (xe.type) {
+    case 'click':
+      e.x = xe.offsetX
+      e.y = xe.offsetY
+      break
+    }
+
+    chan.send(e)
+  }, [])
+}
+
+function switchy(arg, opts) {
+  let o = opts[arg]
+  if (!o) {
+    o = opts['default']
+  }
+  if (!o) {
+    throw 'unhandled ' + arg
+  }
+  return o()
+}
 
 const GAME_MODES = [
   { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
@@ -287,10 +319,6 @@ const Game = make_class('game', {
     parent.appendChild(status)
   },
 
-  setup_events (s) {
-    hook(s.canvas, 'click', {}, this.on_click, [s])
-  },
-
   draw_border (s, ctx) {
     ctx.save()
     if (s.settings.wrap) {
@@ -454,22 +482,22 @@ const Game = make_class('game', {
     return Math.round(t / 1000)
   },
 
-  on_click (e, s) {
-    let scale = s.canvas.offsetWidth / s.canvas_width
-    let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
-    let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
+  on_click (state, offsetX, offsetY) {
+    let scale = state.canvas.offsetWidth / state.canvas_width
+    let x = Math.floor((offsetX / scale - state.border_width) / state.cell_width)
+    let y = Math.floor((offsetY / scale - state.border_width) / state.cell_width)
 
-    let cell = s.game.field.pull(x, y)
+    let cell = state.game.field.pull(x, y)
     if (cell) {
-      this.start_spin(s, cell, 1)
+      this.start_spin(state, cell, 1)
     } else {
-      cell = s.game.field.examine(x, y)
-      s.movings.get(cell.id).times++
+      cell = state.game.field.examine(x, y)
+      state.movings.get(cell.id).times++
     }
 
-    if (!this.is_active_cell(s, cell)) {
-      s.game.active_cell = cell
-      s.game.clicks++
+    if (!this.is_active_cell(state, cell)) {
+      state.game.active_cell = cell
+      state.game.clicks++
     }
   },
 
@@ -539,8 +567,24 @@ const Game = make_class('game', {
     s.force_draw = true
   },
 
-  start (s, settings) {
-    this.new_game(s, settings)
+  start (state, settings) {
+    this.new_game(state, settings)
+
+    let control = make_channel()
+    hook_chan(state.canvas, 'click', control)
+
+    run_proc(function* (ctx) {
+      while (true) {
+        let [chan, msg] = yield ctx.on([control])
+        switchy(chan, {
+          [control]: () => {
+            switchy(msg.tag, {
+              click: () => this.on_click(state, msg.x, msg.y)
+            })
+          }
+        })
+      }
+    }.bind(this))
   },
 
   pause (s, p) {
@@ -603,7 +647,6 @@ function new_game (element) {
   }
 
   Game.static.setup_elements(s, element)
-  Game.static.setup_events(s)
 
   return Game.new(s)
 }
@@ -646,31 +689,23 @@ const Controller = make_class('controller', {
     }
   },
 
-  setup_events (s) {
-    // hook(s.document, 'visibilitychange', {}, this.on_showhide, [s])
-    hook(s.document, 'focus', {}, this.on_focus, [s])
-    hook(s.document, 'blur', {}, this.on_focus, [s])
-    hook(s.new_game_button, 'click', {}, this.on_new_game_click, [s])
-    hook(s.solve_button, 'click', {}, this.on_solve_click, [s])
+  on_showhide (state) {
+    state.game.pause(state.document.hidden)
+  },
+  on_focus (state, e) {
+    state.game.pause(e.type === 'blur')
+  },
+  on_new_game_click (state, e) {
+    let settings = state.mode_select.options[state.mode_select.selectedIndex].settings
+    state.localStorage.setItem('settings', JSON.stringify(settings))
+    state.settings = settings
+    state.game.new_game(settings)
+  },
+  on_solve_click (state) {
+    state.game.solve()
   },
 
-  on_showhide (e, s) {
-    s.game.pause(s.document.hidden)
-  },
-  on_focus (e, s) {
-    s.game.pause(e.type === 'blur')
-  },
-  on_new_game_click (e, s) {
-    let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
-    s.localStorage.setItem('settings', JSON.stringify(settings))
-    s.settings = settings
-    s.game.new_game(settings)
-  },
-  on_solve_click (e, s) {
-    s.game.solve()
-  },
-
-  on_game_event (e, state) {
+  on_game_event (state, e) {
     if (e.event === 'win') {
       let win = e.stats
       let bests = state.stats.post(state.settings.mode, {
@@ -685,12 +720,42 @@ const Controller = make_class('controller', {
 
       defer(0, alert, [msg])
     }
-
-    state.game.channel().hook(this.on_game_event, [state])
   },
 
   start (state) {
-    state.game.channel().hook(this.on_game_event, [state])
+    let world = make_channel()
+    // hook_chan(state.document, 'visibilitychange', world)
+    hook_chan(state.document, 'focus', world)
+    hook_chan(state.document, 'blur', world)
+
+    let control = make_channel(0)
+    hook_chan(state.new_game_button, 'click', control, { tag: 'new_game_click' })
+    hook_chan(state.solve_button, 'click', control, { tag: 'solve_click' })
+
+    let game_events = state.game.channel()
+
+    run_proc(function* (ctx) {
+      while (true) {
+        let [chan, msg] = yield ctx.on([world, control, game_events])
+        switchy(chan, {
+          [game_events]: () => this.on_game_event(state, msg),
+          [world]: () => {
+            switchy(msg.tag, {
+              visibilitychange: () => this.on_show_hide(state),
+              focus: () => this.on_focus(state, msg),
+              blur: () => this.on_focus(state, msg)
+            })
+          },
+          [control]: () => {
+            switchy(msg.tag, {
+              new_game_click: () => this.on_new_game_click(state),
+              solve_click: () => this.on_solve_click(state)
+            })
+          }
+        })
+      }
+    }, this)
+
     state.game.start(state.settings)
     animate(this.draw, [state])
   },
@@ -714,7 +779,6 @@ function new_controller (element, document, localStorage, game, stats) {
 
   Controller.static.load(s)
   Controller.static.setup_elements(s, element)
-  Controller.static.setup_events(s)
 
   return Controller.new(s)
 }

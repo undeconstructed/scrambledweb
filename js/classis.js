@@ -1,5 +1,8 @@
 
 const OBJECT_META = Symbol('_object')
+const ASYNC = Symbol('async')
+
+const assert = console.assert
 
 export function make_class (name, fs, api) {
   let ms = {}
@@ -48,8 +51,19 @@ function new_object (state, ms, api, type) {
   let o = {}
 
   for (let m in api) {
-    let a = ms[m].bind(ms, state)
-    o[m] = a
+    let def = api[m]
+    if (def['async']) {
+      let inner = ms[m].bind(ms, state)
+      let a = function () {
+        let chan = state[def['async']]
+        chan.send(arguments)
+      }
+      a[ASYNC] = true
+      o[m] = a
+    } else {
+      let a = ms[m].bind(ms, state)
+      o[m] = a
+    }
   }
 
   state[OBJECT_META] = { type }
@@ -67,61 +81,64 @@ function new_object (state, ms, api, type) {
   return Object.seal(o)
 }
 
-const Channel = make_class('channel', {
-  send (state, msg) {
-    if (state.hook) {
-      this.run_hook(state, msg)
-      return true
-    }
-    if (state.array.length < state.cap) {
-      state.array.push(msg)
-      return true
-    }
-    return false
-  },
-  recv () {
-    return state.array.unshift()
-  },
-  hook (state, func, args) {
-    state.hook = {
-      func, args
-    }
-    let e = state.array.unshift()
-    if (e) {
-      this.run_hook(state, e)
-    }
-  },
-  run_hook (state, e) {
-    let hook = state.hook
-    setTimeout(function () {
-      hook.func(e, ...hook.args)
-    }, 0)
-    state.hook = null
+function send (state, msg) {
+  if (state.hook) {
+    run_hook(state, msg)
+    return true
   }
-}, {
-  send: {},
-  recv: {},
-  hook: {}
-})
-
-export function make_channel (cap) {
-  cap = cap === undefined ? 10000 : cap
-  let array = []
-  return Channel.new({
-    cap,
-    array
-  })
+  if (state.array.length < state.cap) {
+    state.array.push(msg)
+    return true
+  }
+  return false
 }
 
-export function run_proc (gen) {
+function hook (state, func, args) {
+  state.hook = {
+    func, args
+  }
+  let msg = state.array.shift()
+  if (msg) {
+    run_hook(state, msg)
+  }
+}
+
+function run_hook (state, msg) {
+  let hook = state.hook
+  state.hook = null
+  setTimeout(function () {
+    hook.func(msg, ...hook.args)
+  }, 0)
+}
+
+let chan_count = 0
+
+export function make_channel (cap) {
+  let id = 'chan_' + chan_count++
+
+  let state = {
+    cap: cap === undefined ? 10000 : cap,
+    array: [],
+    hook: null
+  }
+
+  return {
+    send: (msg) => send(state, msg),
+    hook: (func, args) => hook(state, func, args),
+    toString: () => id
+  }
+}
+
+export function run_proc (gen, self) {
   let ctx = {
     on: function (chans) {
       let yon = chans
       let cb = function (e, chan) {
-        if (yon !== null) {
-          proc.next([chan, e])
-          yon = null
+        if (!yon) {
+          return
         }
+        yon = null
+        proc.next([chan, e])
       }
       for (let chan of chans) {
         chan.hook(cb, [chan])
@@ -129,5 +146,10 @@ export function run_proc (gen) {
     }
   }
 
+  if (self) {
+    gen = gen.bind(self)
+  }
+
   let proc = gen(ctx)
+  proc.next()
 }
