@@ -103,6 +103,10 @@ function hook (state, func, args) {
   }
 }
 
+function unhook (state, func, args) {
+  state.hook = null
+}
+
 function run_hook (state, msg) {
   let hook = state.hook
   state.hook = null
@@ -117,6 +121,7 @@ export function make_channel (cap) {
   let id = 'chan_' + chan_count++
 
   let state = {
+    id: id,
     cap: cap === undefined ? 10000 : cap,
     array: [],
     hook: null
@@ -125,6 +130,7 @@ export function make_channel (cap) {
   return {
     send: (msg) => send(state, msg),
     hook: (func, args) => hook(state, func, args),
+    unhook: (func, args) => unhook(state, func, args),
     toString: () => id
   }
 }
@@ -137,9 +143,13 @@ export function run_proc (gen, self) {
         if (!yon) {
           return
         }
+        for (let chan of chans) {
+          chan.unhook(cb, [chan])
+        }
         yon = null
         proc.next([chan, e])
       }
+      cb.chans = chans
       for (let chan of chans) {
         chan.hook(cb, [chan])
       }

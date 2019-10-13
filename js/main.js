@@ -606,13 +606,18 @@ const Game = make_class('game', {
 
   solve (s) {
     s.game.cheated = true
-    for (let r of s.game.field.solution()) {
-      for (let cell of r()) {
-        if (cell.turn) {
-          this.start_spin(s, cell, cell.turn)
+    run_proc(function* (ctx) {
+      for (let r of s.game.field.solution()) {
+        for (let cell of r()) {
+          if (cell.turn) {
+            this.start_spin(s, cell, cell.turn)
+          }
         }
       }
-    }
+      s.channel.send({
+        event: 'solved'
+      })
+    }, this)
   },
 
   channel (s) {
@@ -701,30 +706,25 @@ const Controller = make_class('controller', {
     state.settings = settings
     state.game.new_game(settings)
   },
-  on_solve_click (state) {
-    state.game.solve()
-  },
 
-  on_game_event (state, e) {
-    if (e.event === 'win') {
-      let win = e.stats
-      let bests = state.stats.post(state.settings.mode, {
-        time: -win.time,
-        moves: -win.moves
-      })
+  on_win (state, e) {
+    let win = e.stats
+    let bests = state.stats.post(state.settings.mode, {
+      time: -win.time,
+      moves: -win.moves
+    })
 
-      let msg = `you won in ${win.time} seconds using ${win.moves} moves!`
-      if (bests.length > 0) {
-        msg += `\nthat\'s your best ${join(bests, ' and ')}!`
-      }
-
-      defer(0, alert, [msg])
+    let msg = `you won in ${win.time} seconds using ${win.moves} moves!`
+    if (bests.length > 0) {
+      msg += `\nthat\'s your best ${join(bests, ' and ')}!`
     }
+
+    defer(0, alert, [msg])
   },
 
   start (state) {
     let world = make_channel()
-    // hook_chan(state.document, 'visibilitychange', world)
+    hook_chan(state.document, 'visibilitychange', world)
     hook_chan(state.document, 'focus', world)
     hook_chan(state.document, 'blur', world)
 
@@ -737,22 +737,34 @@ const Controller = make_class('controller', {
     run_proc(function* (ctx) {
       while (true) {
         let [chan, msg] = yield ctx.on([world, control, game_events])
-        switchy(chan, {
-          [game_events]: () => this.on_game_event(state, msg),
-          [world]: () => {
-            switchy(msg.tag, {
-              visibilitychange: () => this.on_show_hide(state),
-              focus: () => this.on_focus(state, msg),
-              blur: () => this.on_focus(state, msg)
-            })
-          },
-          [control]: () => {
-            switchy(msg.tag, {
-              new_game_click: () => this.on_new_game_click(state),
-              solve_click: () => this.on_solve_click(state)
-            })
-          }
+        let next = switchy(chan, {
+          [game_events]: () => switchy(msg.event, {
+            'win': () => this.on_win(state, msg)
+          }),
+          [world]: () => switchy(msg.tag, {
+            visibilitychange: () => this.on_showhide(state),
+            focus: () => this.on_focus(state, msg),
+            blur: () => this.on_focus(state, msg)
+          }),
+          [control]: () => switchy(msg.tag, {
+            new_game_click: () => this.on_new_game_click(state),
+            solve_click: () => 'solve'
+          })
         })
+
+        if (next === 'solve') {
+          state.game.solve()
+          let [chan, msg] = yield ctx.on([world, game_events])
+          switchy(chan, {
+            [world]: () => switchy(msg.tag, {
+              visibilitychange: () => this.on_showhide(state),
+              default: () => {}
+            }),
+            [game_events]: () => switchy(msg.event, {
+              'solved': () => {}
+            })
+          })
+        }
       }
     }, this)
 
