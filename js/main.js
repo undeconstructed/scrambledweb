@@ -589,7 +589,10 @@ const Game = make_class('game', {
       field.pull(cell_data.id)
       cell_data.turns--
       this.start_spin(state, cell_data)
+      return false
     }
+
+    return true
   },
 
   check_win (game) {
@@ -641,7 +644,6 @@ const Game = make_class('game', {
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
-    s.force_draw = true
   },
 
   start (state, settings) {
@@ -653,10 +655,10 @@ const Game = make_class('game', {
     let anima = state.animations.output()
     let frame = state.frame
 
-    run_proc(function* (ctx) {
+    run_proc(function* () {
       main:
       while (true) {
-        let [chan, msg] = yield ctx.on([control, input, anima, frame])
+        let [chan, msg] = yield [control, input, anima, frame]
         let next = switchy(chan, {
           [control]: () => switchy(msg.tag, {
             click: () => this.on_click(state, msg.x, msg.y)
@@ -691,8 +693,10 @@ const Game = make_class('game', {
 
         if (next === 'pause') {
           this.do_pause(state, msg.pause)
+          // draw once in paused mode
+          this.draw_all(state)
           while (true) {
-            let [chan, msg] = yield ctx.on([input])
+            let [chan, msg] = yield [input]
             if (msg.type === 'pause' && msg.pause === false) {
               this.do_pause(state, false)
               continue main
@@ -701,18 +705,16 @@ const Game = make_class('game', {
         }
 
         if (next === 'solve') {
-          // TODO - yield run
-          this.do_solve(state)
+          let r = yield this.do_solve(state)
           continue main
         }
 
         if (next === 'won') {
           // force a draw of completed grid
           this.draw_all(state)
-
           this.on_win(state)
           while (true) {
-            let [chan, msg] = yield ctx.on([input])
+            let [chan, msg] = yield [input]
             if (msg.type === 'new_game') {
               this.setup(state, msg.settings)
               control.empty()
@@ -721,7 +723,7 @@ const Game = make_class('game', {
           }
         }
       }
-    }, this)
+    }.bind(this)())
   },
 
   do_pause (s, p) {
@@ -738,24 +740,39 @@ const Game = make_class('game', {
       s.game.time = Date.now()
       s.game.paused = false
     }
-    s.force_draw = true
   },
 
   do_solve (s) {
     s.game.cheated = true
-    // run_proc(function* (ctx) {
-    //   for (let r of s.game.field.solution()) {
-    //     for (let cell of r()) {
-    //       if (cell.turn) {
-    //         this.start_spin(s, cell, cell.turn)
-    //         yield ctx.on([s.settled])
-    //       }
-    //     }
-    //   }
-    //   s.channel.send({
-    //     event: 'solved'
-    //   })
-    // }, this)
+
+    let anima = s.animations.output()
+    let frame = s.frame
+
+    return function* (ctx) {
+      for (let r of s.game.field.solution()) {
+        for (let cell of r()) {
+          if (cell.turn) {
+            let cell_data = s.game.cell_data[cell.id]
+            cell_data.turns = cell.turn-1
+            s.game.field.pull(cell_data.id)
+            this.start_spin(s, cell_data)
+            while (true) {
+              let [chan, msg] = yield [anima, frame]
+              let done = switchy(chan, {
+                [anima]: () => this.after_move(s, cell_data),
+                [frame]: () => {
+                  let now = Date.now()
+                  s.animations.tick(now)
+                  this.draw_all(s)
+                }
+              })
+              if (done) break
+            }
+          }
+        }
+      }
+      return 'ok'
+    }.bind(this)()
   },
 
   draw (state) {
@@ -899,9 +916,9 @@ const Controller = make_class('controller', {
     let game_events = state.game.channel()
     let frame = make_channel(0)
 
-    run_proc(function* (ctx) {
+    run_proc(function* () {
       while (true) {
-        let [chan, msg] = yield ctx.on([world, control, game_events, frame])
+        let [chan, msg] = yield [world, control, game_events, frame]
         let next = switchy(chan, {
           [game_events]: () => switchy(msg.event, {
             'win': () => this.on_win(state, msg)
@@ -920,7 +937,7 @@ const Controller = make_class('controller', {
 
         if (next === 'solve') {
           state.game.solve()
-          let [chan, msg] = yield ctx.on([world, game_events, frame])
+          let [chan, msg] = yield [world, game_events, frame]
           switchy(chan, {
             [world]: () => switchy(msg.tag, {
               visibilitychange: () => this.on_showhide(state),
@@ -933,7 +950,7 @@ const Controller = make_class('controller', {
           })
         }
       }
-    }, this)
+    }.bind(this)())
 
     state.game.start(state.settings)
     animate(this.draw, [frame])

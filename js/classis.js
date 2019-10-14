@@ -147,18 +147,19 @@ export function make_channel (cap) {
   }
 }
 
-function process_proc_yield (proc, ctx, y) {
-  if (y.done) return
+function process_proc_yield (proc, y) {
+  if (y.done) {
+    proc.stack.shift()
+    if (proc.stack.length === 0) {
+      return
+    }
 
-  y = y.value
-
-  if (!y || y.ctx !== ctx) throw 'proc error'
-
-  if (y.chans) {
-    let chans = y.chans
+    iterate_proc(proc, y.value)
+  } else if (Array.isArray(y.value)) {
+    let chans = y.value
     let fired = false
 
-    let cb = function (e, chan) {
+    let cb = function (msg, chan) {
       if (fired) {
         return
       }
@@ -168,55 +169,39 @@ function process_proc_yield (proc, ctx, y) {
         chan.unhook(cb, [chan])
       }
 
-      let y = null
-      try {
-        y = proc.next([chan, e])
-      } catch (e) {
-        console.log('proc error', e)
-        return
-      }
-      process_proc_yield(proc, ctx, y)
+      iterate_proc(proc, [chan, msg])
     }
 
     for (let chan of chans) {
       chan.hook(cb, [chan])
     }
-  } else if (y.run) {
-    console.log('subproc not implemented')
+  } else if (y.value.next) {
+    let gen = y.value
+    proc.stack.unshift(gen)
+
+    iterate_proc(proc, null)
+  } else {
+    console.log(y)
   }
 }
 
-export function run_proc (gen, self) {
-  // TODO - use this stack to handle nested gens
-  let stack = []
-
-  let ctx = {}
-
-  ctx.on = function (chans) {
-    return {
-      ctx: ctx,
-      chans: chans,
+function iterate_proc(proc, value) {
+  setTimeout(function () {
+    let y = null
+    try {
+      y = proc.stack[0].next(value)
+    } catch (e) {
+      console.log('proc error', e, proc)
+      throw e
     }
-  }
-  ctx.run = function (gen) {
-    return {
-      ctx: ctx,
-      run: gen,
-    }
+    process_proc_yield(proc, y)
+  }, 0)
+}
+
+export function run_proc (gen) {
+  let proc = {
+    stack: [ gen ],
   }
 
-  if (self) {
-    gen = gen.bind(self)
-  }
-
-  let proc = gen(ctx)
-
-  let y = null
-  try {
-    y = proc.next()
-  } catch (e) {
-    console.log('proc error', e)
-    return
-  }
-  process_proc_yield(proc, ctx, y)
+  iterate_proc(proc, null)
 }
