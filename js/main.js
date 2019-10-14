@@ -1,6 +1,5 @@
-
 import { make_class, make_channel, run_proc } from './classis.js'
-import { join, mkel, shuffle, isProbablyInstalled, hook, select, defer, animate, main } from './util.js'
+import { join, mkel, shuffle, isProbablyInstalled, hook, select, animate, main } from './util.js'
 
 function hook_chan(source, event, chan, options) {
   options = options || {}
@@ -158,26 +157,35 @@ const Field = make_class('field', {
     }
   },
 
-  examine (state, x, y) {
+  identify (state, x, y) {
     let cell = state.array[(y * state.w) + x]
+    return cell.n
+  },
+
+  examine (state, id) {
+    let cell = state.array[id]
     return this.public_cell(state, cell)
   },
 
-  pull (state, x, y) {
-    let cell = state.array[(y * state.w) + x]
+  pull (state, id) {
+    let cell = state.array[id]
     if (cell.pulled) {
-      return null
+      return false
     }
     cell.pulled = true
     state.lit = this.find_lit(state.array)
-    return this.public_cell(state, cell)
+    return true
   },
 
-  push (state, x, y) {
-    let cell = state.array[(y * state.w) + x]
+  push (state, id) {
+    let cell = state.array[id]
     this.turn_cell(cell)
+    if (!cell.pulled) {
+      return false
+    }
     cell.pulled = false
     state.lit = this.find_lit(state.array)
+    return true
   },
 
   is_won (state) {
@@ -206,6 +214,7 @@ const Field = make_class('field', {
 }, {
   is_won: {},
   shuffle: {},
+  identify: {},
   examine: {},
   pull: {},
   push: {},
@@ -304,6 +313,83 @@ function new_field (w, h, wrap) {
   return Field.new(state)
 }
 
+const Animation = make_class('animation', {
+  update(state, now) {
+    let phase = (now - state.start) / state.length
+    if (phase < 1) {
+      state.target.phase = phase
+      return false
+    } else {
+      state.target.phase = 1
+      return true
+    }
+  },
+}, {
+  update: {},
+  target: {
+    get: 'target',
+  },
+})
+
+function new_animation(target, length, start) {
+  let state = {
+    target,
+    length,
+    start,
+  }
+
+  return Animation.new(state)
+}
+
+const Animations = make_class('animations', {
+  add(state, id, animation) {
+    let list = this.get_list(state, id)
+    list.push(animation)
+  },
+  get_list(state, id) {
+    let list = state.map.get(id)
+    if (!list) {
+      list = []
+      state.map.set(id, list)
+    }
+    return list
+  },
+  tick(state, now) {
+    for (let k of state.map.keys()) {
+      let list = state.map.get(k)
+      let anim = list[0]
+      if (!anim) {
+        state.map.delete(k)
+        continue
+      }
+      let done = anim.update(now)
+      if (done) {
+        list.shift()
+        state.output.send({
+          event: 'done',
+          id: k,
+          animation: anim,
+        })
+      }
+    }
+  },
+}, {
+  add: {},
+  tick: {},
+  output: {
+    get: 'output',
+  }
+})
+
+function new_animations() {
+  let state = {
+    map: new Map(),
+    output: make_channel(),
+  }
+
+  return Animations.new(state)
+}
+
 const Game = make_class('game', {
   setup_elements (s, parent) {
     s.canvas = mkel('canvas', {})
@@ -385,7 +471,7 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  draw_cell (s, ctx, cell, moving, active, now) {
+  draw_cell (s, ctx, cell, phase, active) {
     ctx.save()
 
     if (active) {
@@ -397,9 +483,9 @@ const Game = make_class('game', {
     ctx.fillStyle = 'rgba(255,255,255,0.1)'
     ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
 
-    if (moving) {
+    if (phase > 0) {
       ctx.translate(s.half_cell, s.half_cell)
-      ctx.rotate((Math.PI / 2) * moving.phase)
+      ctx.rotate((Math.PI / 2) * phase)
       ctx.translate(-s.half_cell, -s.half_cell)
     }
 
@@ -419,13 +505,14 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  draw_cells (s, ctx, now) {
+  draw_cells (s, ctx) {
     ctx.save()
     for (let r of s.game.field.rows()) {
       ctx.save()
       for (let cell of r()) {
-        let moving = s.movings.get(cell.id)
-        this.draw_cell(s, ctx, cell, moving, this.is_active_cell(s, cell), now)
+        let id = cell.id
+        let cell_data = s.game.cell_data[id]
+        this.draw_cell(s, ctx, cell, cell_data.phase, this.is_active_cell(s, cell))
         ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
@@ -433,45 +520,27 @@ const Game = make_class('game', {
     }
     ctx.restore()
   },
-  draw (s) {
-    let now = Date.now()
+  draw_all (s) {
+    let ctx = s.canvas.getContext('2d')
+    ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
-    if (s.force_draw || s.movings.size > 0) {
-      s.force_draw = false
-
-      for (let k of s.movings.keys()) {
-        let m = s.movings.get(k)
-        m.phase = (now - m.start) / s.animation_time
-        if (m.phase > 1) {
-          s.movings.delete(k)
-          if (m.cell) {
-            this.after_animate(s, m)
-          }
-        }
-      }
-
-      let ctx = s.canvas.getContext('2d')
-      ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
-
-      ctx.save()
-      if (!s.game.paused) {
-        this.draw_border(s, ctx)
-        ctx.translate(s.border_width, s.border_width)
-        this.draw_cells(s, ctx, now)
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.3)'
-        ctx.fillRect(0, 0, s.canvas_width, s.canvas_height)
-      }
-      ctx.restore()
+    ctx.save()
+    if (!s.game.paused) {
+      this.draw_border(s, ctx)
+      ctx.translate(s.border_width, s.border_width)
+      this.draw_cells(s, ctx)
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'
+      ctx.fillRect(0, 0, s.canvas_width, s.canvas_height)
     }
+    ctx.restore()
 
     s.click_counter.textContent = s.game.clicks
     s.time_counter.textContent = this.seconds_gone(s.game)
   },
 
   is_active_cell (state, cell) {
-    let ac = state.game.active_cell
-    return ac && ac.id === cell.id
+    return state.game.active_cell === cell.id
   },
 
   seconds_gone (game) {
@@ -483,44 +552,43 @@ const Game = make_class('game', {
   },
 
   on_click (state, offsetX, offsetY) {
+    // TODO - scaling should happen in controller
     let scale = state.canvas.offsetWidth / state.canvas_width
     let x = Math.floor((offsetX / scale - state.border_width) / state.cell_width)
     let y = Math.floor((offsetY / scale - state.border_width) / state.cell_width)
 
-    let cell = state.game.field.pull(x, y)
-    if (cell) {
-      this.start_spin(state, cell, 1)
+    let field = state.game.field
+
+    let id = field.identify(x, y)
+    let cell_data = state.game.cell_data[id]
+
+    if (field.pull(id)) {
+      this.start_spin(state, cell_data)
     } else {
-      cell = state.game.field.examine(x, y)
-      state.movings.get(cell.id).times++
+      cell_data.turns++
     }
 
-    if (!this.is_active_cell(state, cell)) {
-      state.game.active_cell = cell
+    if (!this.is_active_cell(state, cell_data)) {
+      state.game.active_cell = id
       state.game.clicks++
     }
   },
 
-  start_spin (s, cell, times) {
-    s.movings.set(cell.id, {
-      start: Date.now(),
-      cell: cell,
-      times: times
-    })
+  start_spin (state, cell_data) {
+    let anim = new_animation(cell_data, state.animation_time, Date.now())
+    state.animations.add(cell_data.id, anim)
   },
 
-  after_animate (s, m) {
-    let {cell, times} = m
-    s.game.field.push(cell.x, cell.y)
+  after_move (state, cell_data) {
+    let field = state.game.field
 
-    if (this.check_win(s.game)) {
-      s.game.won = true
-      defer(0, this.on_win, [s])
-    }
+    field.push(cell_data.id)
+    cell_data.phase = 0
 
-    if (times > 1) {
-      s.game.field.pull(cell.x, cell.y)
-      this.start_spin(s, cell, times-1)
+    if (cell_data.turns > 0) {
+      field.pull(cell_data.id)
+      cell_data.turns--
+      this.start_spin(state, cell_data)
     }
   },
 
@@ -540,16 +608,17 @@ const Game = make_class('game', {
     let time = Math.round(s.game.acc_time / 1000)
     let moves = s.game.clicks
 
-    s.channel.send({
+    s.output.send({
       event: 'win',
       stats: { time, moves }
     })
   },
 
-  new_game (s, settings) {
+  setup (s, settings) {
     s.settings = settings
     s.game = {
       field: new_field(s.settings.w, s.settings.h, s.settings.wrap),
+      cell_data: [],
       active_cell: null,
       clicks: 0,
       time: Date.now(),
@@ -558,36 +627,104 @@ const Game = make_class('game', {
       paused: false,
       cheated: false
     }
+    for (let r of s.game.field.rows()) {
+      for (let cell of r()) {
+        s.game.cell_data[cell.id] = {
+          id: cell.id,
+          phase: 0,
+          turns: 0,
+        }
+      }
+    }
     s.game.field.shuffle()
     s.canvas_width = s.settings.w*s.cell_width + s.border_width*2
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
-    s.movings = new Map()
     s.force_draw = true
   },
 
   start (state, settings) {
-    this.new_game(state, settings)
+    this.setup(state, settings)
 
     let control = make_channel()
     hook_chan(state.canvas, 'click', control)
+    let input = state.input
+    let anima = state.animations.output()
+    let frame = state.frame
 
     run_proc(function* (ctx) {
+      main:
       while (true) {
-        let [chan, msg] = yield ctx.on([control])
-        switchy(chan, {
-          [control]: () => {
-            switchy(msg.tag, {
-              click: () => this.on_click(state, msg.x, msg.y)
-            })
-          }
+        let [chan, msg] = yield ctx.on([control, input, anima, frame])
+        let next = switchy(chan, {
+          [control]: () => switchy(msg.tag, {
+            click: () => this.on_click(state, msg.x, msg.y)
+          }),
+          [input]: () => switchy(msg.type, {
+            new_game: () => 'new_game',
+            pause: () => 'pause',
+            solve: () => 'solve',
+          }),
+          [anima]: () => {
+            let cell_data = state.game.cell_data[msg.id]
+            this.after_move(state, cell_data)
+            if (this.check_win(state.game)) {
+              state.game.won = true
+              return 'won'
+            }
+          },
+          [frame]: () => 'draw'
         })
+
+        if (next === 'draw') {
+          let now = Date.now()
+          state.animations.tick(now)
+          this.draw_all(state)
+          continue main
+        }
+
+        if (next === 'new_game') {
+          this.setup(state, msg.settings)
+          continue main
+        }
+
+        if (next === 'pause') {
+          this.do_pause(state, msg.pause)
+          while (true) {
+            let [chan, msg] = yield ctx.on([input])
+            if (msg.type === 'pause' && msg.pause === false) {
+              this.do_pause(state, false)
+              continue main
+            }
+          }
+        }
+
+        if (next === 'solve') {
+          // TODO - yield run
+          this.do_solve(state)
+          continue main
+        }
+
+        if (next === 'won') {
+          // force a draw of completed grid
+          this.draw_all(state)
+
+          this.on_win(state)
+          while (true) {
+            let [chan, msg] = yield ctx.on([input])
+            if (msg.type === 'new_game') {
+              this.setup(state, msg.settings)
+              control.empty()
+              continue main
+            }
+          }
+        }
       }
-    }.bind(this))
+    }, this)
   },
 
-  pause (s, p) {
+  do_pause (s, p) {
     if (p) {
       if (s.game.paused || s.game.won) {
         return
@@ -604,24 +741,47 @@ const Game = make_class('game', {
     s.force_draw = true
   },
 
-  solve (s) {
+  do_solve (s) {
     s.game.cheated = true
-    run_proc(function* (ctx) {
-      for (let r of s.game.field.solution()) {
-        for (let cell of r()) {
-          if (cell.turn) {
-            this.start_spin(s, cell, cell.turn)
-          }
-        }
-      }
-      s.channel.send({
-        event: 'solved'
-      })
-    }, this)
+    // run_proc(function* (ctx) {
+    //   for (let r of s.game.field.solution()) {
+    //     for (let cell of r()) {
+    //       if (cell.turn) {
+    //         this.start_spin(s, cell, cell.turn)
+    //         yield ctx.on([s.settled])
+    //       }
+    //     }
+    //   }
+    //   s.channel.send({
+    //     event: 'solved'
+    //   })
+    // }, this)
   },
 
-  channel (s) {
-    return s.channel
+  draw (state) {
+    state.frame.send({
+      type: 'frame',
+    })
+  },
+
+  new_game (state, settings) {
+    state.input.send({
+      type: 'new_game',
+      settings: settings,
+    })
+  },
+
+  pause (state, p) {
+    state.input.send({
+      type: 'pause',
+      pause: p,
+    })
+  },
+
+  solve (state) {
+    state.input.send({
+      type: 'solve',
+    })
   }
 }, {
   start: {},
@@ -629,11 +789,12 @@ const Game = make_class('game', {
   pause: {},
   solve: {},
   draw: {},
-  channel: {},
+  channel: {
+    get: 'output'
+  },
 })
 
 function new_game (element) {
-  let channel = make_channel()
   let s = {
     // config
     border_width: 4,
@@ -644,9 +805,12 @@ function new_game (element) {
     settings: null,
     // game state
     game: null,
-    channel: channel,
+    output: make_channel(),
+    input: make_channel(),
+    frame: make_channel(0),
+    settled: make_channel(),
     // for drawing
-    movings: new Map(),
+    animations: new_animations(),
     canvas_width: 100,
     canvas_height: 100
   }
@@ -719,7 +883,7 @@ const Controller = make_class('controller', {
       msg += `\nthat\'s your best ${join(bests, ' and ')}!`
     }
 
-    defer(0, alert, [msg])
+    alert(msg)
   },
 
   start (state) {
@@ -733,10 +897,11 @@ const Controller = make_class('controller', {
     hook_chan(state.solve_button, 'click', control, { tag: 'solve_click' })
 
     let game_events = state.game.channel()
+    let frame = make_channel(0)
 
     run_proc(function* (ctx) {
       while (true) {
-        let [chan, msg] = yield ctx.on([world, control, game_events])
+        let [chan, msg] = yield ctx.on([world, control, game_events, frame])
         let next = switchy(chan, {
           [game_events]: () => switchy(msg.event, {
             'win': () => this.on_win(state, msg)
@@ -749,12 +914,13 @@ const Controller = make_class('controller', {
           [control]: () => switchy(msg.tag, {
             new_game_click: () => this.on_new_game_click(state),
             solve_click: () => 'solve'
-          })
+          }),
+          [frame]: () => state.game.draw(),
         })
 
         if (next === 'solve') {
           state.game.solve()
-          let [chan, msg] = yield ctx.on([world, game_events])
+          let [chan, msg] = yield ctx.on([world, game_events, frame])
           switchy(chan, {
             [world]: () => switchy(msg.tag, {
               visibilitychange: () => this.on_showhide(state),
@@ -762,19 +928,20 @@ const Controller = make_class('controller', {
             }),
             [game_events]: () => switchy(msg.event, {
               'solved': () => {}
-            })
+            }),
+            [frame]: () => state.game.draw(),
           })
         }
       }
     }, this)
 
     state.game.start(state.settings)
-    animate(this.draw, [state])
+    animate(this.draw, [frame])
   },
 
-  draw (state) {
-    state.game.draw()
-    animate(this.draw, [state])
+  draw (frame) {
+    frame.send({})
+    animate(this.draw, [frame])
   }
 }, {
   start: {}

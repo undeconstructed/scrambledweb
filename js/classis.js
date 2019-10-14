@@ -54,11 +54,18 @@ function new_object (state, ms, api, type) {
     let def = api[m]
     if (def['async']) {
       let inner = ms[m].bind(ms, state)
+      let chan_name = def['async']
       let a = function () {
-        let chan = state[def['async']]
+        let chan = state[chan_name]
         chan.send(arguments)
       }
       a[ASYNC] = true
+      o[m] = a
+    } else if (def['get']) {
+      let field = def['get']
+      let a = function () {
+        return state[field]
+      }
       o[m] = a
     } else {
       let a = ms[m].bind(ms, state)
@@ -131,28 +138,70 @@ export function make_channel (cap) {
     send: (msg) => send(state, msg),
     hook: (func, args) => hook(state, func, args),
     unhook: (func, args) => unhook(state, func, args),
-    toString: () => id
+    empty: () => {
+      let out = state.array
+      state.array = []
+      return out
+    },
+    toString: () => id,
+  }
+}
+
+function process_proc_yield (proc, ctx, y) {
+  if (y.done) return
+
+  y = y.value
+
+  if (!y || y.ctx !== ctx) throw 'proc error'
+
+  if (y.chans) {
+    let chans = y.chans
+    let fired = false
+
+    let cb = function (e, chan) {
+      if (fired) {
+        return
+      }
+      fired = false
+
+      for (let chan of chans) {
+        chan.unhook(cb, [chan])
+      }
+
+      let y = null
+      try {
+        y = proc.next([chan, e])
+      } catch (e) {
+        console.log('proc error', e)
+        return
+      }
+      process_proc_yield(proc, ctx, y)
+    }
+
+    for (let chan of chans) {
+      chan.hook(cb, [chan])
+    }
+  } else if (y.run) {
+    console.log('subproc not implemented')
   }
 }
 
 export function run_proc (gen, self) {
-  let ctx = {
-    on: function (chans) {
-      let yon = chans
-      let cb = function (e, chan) {
-        if (!yon) {
-          return
-        }
-        for (let chan of chans) {
-          chan.unhook(cb, [chan])
-        }
-        yon = null
-        proc.next([chan, e])
-      }
-      cb.chans = chans
-      for (let chan of chans) {
-        chan.hook(cb, [chan])
-      }
+  // TODO - use this stack to handle nested gens
+  let stack = []
+
+  let ctx = {}
+
+  ctx.on = function (chans) {
+    return {
+      ctx: ctx,
+      chans: chans,
+    }
+  }
+  ctx.run = function (gen) {
+    return {
+      ctx: ctx,
+      run: gen,
     }
   }
 
@@ -161,5 +210,13 @@ export function run_proc (gen, self) {
   }
 
   let proc = gen(ctx)
-  proc.next()
+
+  let y = null
+  try {
+    y = proc.next()
+  } catch (e) {
+    console.log('proc error', e)
+    return
+  }
+  process_proc_yield(proc, ctx, y)
 }
