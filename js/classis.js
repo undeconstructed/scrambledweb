@@ -147,14 +147,22 @@ export function make_channel (cap) {
   }
 }
 
-function process_proc_yield (proc, y) {
+function process_proc_yield (frame, y) {
   if (y.done) {
-    proc.stack.shift()
-    if (proc.stack.length === 0) {
+    for (let d of frame.defer) {
+      try {
+        d()
+      } catch (e) {
+        console.log('defer error', e, frame)
+      }
+    }
+
+    let parent = frame.parent
+    if (!parent) {
       return
     }
 
-    iterate_proc(proc, y.value)
+    iterate_proc(parent, y.value)
   } else if (Array.isArray(y.value)) {
     let chans = y.value
     let fired = false
@@ -169,39 +177,52 @@ function process_proc_yield (proc, y) {
         chan.unhook(cb, [chan])
       }
 
-      iterate_proc(proc, [chan, msg])
+      iterate_proc(frame, [chan, msg])
     }
 
     for (let chan of chans) {
       chan.hook(cb, [chan])
     }
   } else if (y.value.next) {
-    let gen = y.value
-    proc.stack.unshift(gen)
-
-    iterate_proc(proc, null)
+    run_proc(y.value, frame)
   } else {
     console.log(y)
   }
 }
 
-function iterate_proc(proc, value) {
+function iterate_proc(frame, value) {
   setTimeout(function () {
     let y = null
     try {
-      y = proc.stack[0].next(value)
+      y = frame.gen.next(value)
     } catch (e) {
-      console.log('proc error', e, proc)
+      console.log('proc error', e, frame)
       throw e
     }
-    process_proc_yield(proc, y)
+    process_proc_yield(frame, y)
   }, 0)
 }
 
-export function run_proc (gen) {
-  let proc = {
-    stack: [ gen ],
+export function run_proc (p, parent) {
+  let frame = {
+    gen: null,
+    defer: [],
+    parent: parent,
   }
 
-  iterate_proc(proc, null)
+  if (p.next) {
+    frame.gen = p
+  } else if (typeof p === 'function') {
+    let ctx = {}
+    ctx.wait = (chans) => chans
+    ctx.run = (proc) => proc
+    ctx.defer = (f) => {
+      frame.defer.push(f)
+    }
+    frame.gen = p(ctx)
+  } else {
+    throw 'unknown proc type'
+  }
+
+  iterate_proc(frame, null)
 }
