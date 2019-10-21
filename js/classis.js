@@ -55,9 +55,15 @@ function new_object (state, ms, api, type) {
     if (def['async']) {
       let inner = ms[m].bind(ms, state)
       let chan_name = def['async']
-      let a = function () {
+      let a = function (...args) {
+        let ret_chan = make_chan(1)
         let chan = state[chan_name]
-        chan.send(arguments)
+        chan.send({
+          method: m,
+          args: args,
+          ret: ret_chan,
+        })
+        return ret_chan
       }
       a[ASYNC] = true
       o[m] = a
@@ -81,9 +87,11 @@ function new_object (state, ms, api, type) {
     }
   }
 
-  o['toJSON'] = function () {
-    return JSON.stringify(serialise(this))
-  }.bind(o)
+  if (!o['toJSON']) {
+    o['toJSON'] = function () {
+      return JSON.stringify(serialise(this))
+    }.bind(o)
+  }
 
   return Object.seal(o)
 }
