@@ -1,7 +1,7 @@
 import { make_class, make_channel, run_proc } from './classis.js'
 import { join, mkel, shuffle, isProbablyInstalled, hook, select, animate, main } from './util.js'
 
-function hook_chan(source, event, chan, options) {
+function hook_chan (source, event, chan, options) {
   options = options || {}
   options.tag = options.tag || event
 
@@ -22,7 +22,7 @@ function hook_chan(source, event, chan, options) {
   }, [])
 }
 
-function switchy(arg, opts) {
+function switchy (arg, opts) {
   let o = opts[arg]
   if (!o) {
     o = opts['default']
@@ -44,6 +44,9 @@ const GAME_MODES = [
 
 const COLOR_ON = 'rgba(50,250,50,1)'
 const COLOR_OFF = 'rgba(150,50,50,1)'
+
+// t, r, b, l => b, l, t, r
+const opposites = [ 2, 3, 0, 1 ]
 
 const Stats = make_class('stats', {
   load (state) {
@@ -133,7 +136,11 @@ const Field = make_class('field', {
 
   turn_cell (cell) {
     cell.routes.unshift(cell.routes.pop())
-    cell.turns = (cell.turns + 1) % 4
+    let turns = (cell.turns + 1) % 4
+    if ((cell.sym === 2 && turns === 2) || cell.sym === 4) {
+      turns = 0
+    }
+    cell.turns = turns
   },
 
   shuffle (state) {
@@ -179,10 +186,10 @@ const Field = make_class('field', {
 
   push (state, id) {
     let cell = state.array[id]
-    this.turn_cell(cell)
     if (!cell.pulled) {
       return false
     }
+    this.turn_cell(cell)
     cell.pulled = false
     state.lit = this.find_lit(state.array)
     return true
@@ -199,11 +206,12 @@ const Field = make_class('field', {
         yield function*() {
           for (let x = 0; x < state.w; x++) {
             let cell = state.array[(y * state.w) + x]
+            let turns = (cell.turns === 0 ? 0 : (cell.sym === 2 ? 1 : (4 - cell.turns)))
             yield {
               id: cell.n,
               x: cell.x,
               y: cell.y,
-              turn: (!cell.turns ? 0 : 4 - cell.turns)
+              turn: turns,
             }
           }
         }
@@ -221,9 +229,6 @@ const Field = make_class('field', {
   rows: {},
   solution: {},
 })
-
-// t, r, b, l => b, l, t, r
-const opposites = [ 2, 3, 0, 1 ]
 
 function new_field (w, h, wrap) {
   let state = { w, h }
@@ -246,7 +251,9 @@ function new_field (w, h, wrap) {
       let turns = 0
       let routes = [ t !== null, r !== null, b !== null, l !== null ]
 
-      array[n] = { n, x, y, type, routes, turns, neighbours }
+      let sym = 4
+
+      array[n] = { n, x, y, type, routes, turns, neighbours, sym }
     }
   }
 
@@ -282,6 +289,16 @@ function new_field (w, h, wrap) {
     }
 
     cells: for (let cell of array) {
+      cell.sym = function calc_sym (routes) {
+        let ends = routes.reduce((a, e) => a + (e ? 1 : 0), 0)
+        if (ends === 4) {
+          return 4
+        }
+        if (ends === 2 && routes.every((e, i) => e === cell.routes[opposites[i]])) {
+          return 2
+        }
+        return 1
+      }(cell.routes)
       if (cell.type !== 'pipe') {
         continue
       }
@@ -304,7 +321,7 @@ function new_field (w, h, wrap) {
       }
     }
   }
-
+console.log(array)
   state.array = array
   state.src = src
   state.tgts = tgts
@@ -331,7 +348,7 @@ const Animation = make_class('animation', {
   },
 })
 
-function new_animation(target, length, start) {
+function new_animation (target, length, start) {
   let state = {
     target,
     length,
@@ -381,7 +398,7 @@ const Animations = make_class('animations', {
   }
 })
 
-function new_animations() {
+function new_animations () {
   let state = {
     map: new Map(),
     output: make_channel(),
@@ -536,7 +553,11 @@ const Game = make_class('game', {
     ctx.restore()
 
     s.click_counter.textContent = s.game.clicks
-    s.time_counter.textContent = this.seconds_gone(s.game)
+    if (s.game.cheated) {
+      s.time_counter.textContent = '∞'
+    } else {
+      s.time_counter.textContent = this.seconds_gone(s.game)
+    }
   },
 
   is_active_cell (state, cell) {
@@ -858,8 +879,6 @@ const Controller = make_class('controller', {
     controls.appendChild(mkel('span', { text: ' | ' }))
     s.solve_button = mkel('button', { text: 'solve' })
     controls.appendChild(s.solve_button)
-    // s.help_button = mkel('a', { text: '?' })
-    // controls.appendChild(s.help_button)
     parent.appendChild(controls)
 
     for (let settings of GAME_MODES) {
