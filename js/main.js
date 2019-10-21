@@ -34,7 +34,7 @@ function switchy (arg, opts) {
 }
 
 const GAME_MODES = [
-  { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
+  // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
   { mode: 'novice', w: 6, h: 7, wrap: false, hide4s: false },
   { mode: 'normal', w: 8, h: 11, wrap: false, hide4s: false },
   { mode: 'expert', w: 8, h: 15, wrap: false, hide4s: false },
@@ -45,8 +45,8 @@ const GAME_MODES = [
 const COLOR_ON = 'rgba(50,250,50,1)'
 const COLOR_OFF = 'rgba(150,50,50,1)'
 
-// t, r, b, l => b, l, t, r
-const opposites = [ 2, 3, 0, 1 ]
+const NUM_SIDES = 4
+const OPPOSITES = [ 2, 3, 0, 1 ] // t, r, b, l => b, l, t, r
 
 const Stats = make_class('stats', {
   load (state) {
@@ -101,12 +101,12 @@ const Field = make_class('field', {
       if (c0.pulled) {
         continue
       }
-      for (let s = 0; s < 4; s++) {
+      for (let s = 0; s < NUM_SIDES; s++) {
         if (c0.routes[s]) {
           let nn = c0.neighbours[s]
           if (nn != null) {
             let n = array[nn]
-            if (n.routes[opposites[s]]) {
+            if (n.routes[OPPOSITES[s]]) {
               if (!lit.has(nn) && !n.pulled) {
                 lit.add(nn)
                 queue.push(n)
@@ -136,7 +136,7 @@ const Field = make_class('field', {
 
   turn_cell (cell) {
     cell.routes.unshift(cell.routes.pop())
-    let turns = (cell.turns + 1) % 4
+    let turns = (cell.turns + 1) % NUM_SIDES
     if ((cell.sym === 2 && turns === 2) || cell.sym === 4) {
       turns = 0
     }
@@ -145,7 +145,7 @@ const Field = make_class('field', {
 
   shuffle (state) {
     for (let cell of state.array) {
-      let n = Math.random()*4
+      let n = Math.random()*NUM_SIDES
       for (let r = 0; r < n; r++) {
         this.turn_cell(cell)
       }
@@ -206,7 +206,7 @@ const Field = make_class('field', {
         yield function*() {
           for (let x = 0; x < state.w; x++) {
             let cell = state.array[(y * state.w) + x]
-            let turns = (cell.turns === 0 ? 0 : (cell.sym === 2 ? 1 : (4 - cell.turns)))
+            let turns = (cell.turns === 0 ? 0 : (cell.sym === 2 ? 1 : (NUM_SIDES - cell.turns)))
             yield {
               id: cell.n,
               x: cell.x,
@@ -291,10 +291,10 @@ function new_field (w, h, wrap) {
     cells: for (let cell of array) {
       cell.sym = function calc_sym (routes) {
         let ends = routes.reduce((a, e) => a + (e ? 1 : 0), 0)
-        if (ends === 4) {
-          return 4
+        if (ends === NUM_SIDES) {
+          return NUM_SIDES
         }
-        if (ends === 2 && routes.every((e, i) => e === cell.routes[opposites[i]])) {
+        if (ends === 2 && routes.every((e, i) => e === cell.routes[OPPOSITES[i]])) {
           return 2
         }
         return 1
@@ -305,12 +305,12 @@ function new_field (w, h, wrap) {
       if (cell.routes.filter(e => e).length !== 2) {
         continue
       }
-      for (let s = 0; s < 4; s++) {
+      for (let s = 0; s < NUM_SIDES; s++) {
         if (cell.routes[s]) {
           let nn = cell.neighbours[s]
           if (nn !== null) {
             let n = array[nn]
-            if (!n.routes[opposites[s]]) {
+            if (!n.routes[OPPOSITES[s]]) {
               cell.type = 'tgt'
               cell.routes[s] = false
               tgts.push(cell)
@@ -321,7 +321,7 @@ function new_field (w, h, wrap) {
       }
     }
   }
-console.log(array)
+
   state.array = array
   state.src = src
   state.tgts = tgts
