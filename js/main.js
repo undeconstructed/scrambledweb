@@ -1,6 +1,37 @@
+import { make_class, make_channel, run_proc } from './classis.js'
+import { join, mkel, shuffle, isProbablyInstalled, hook, select, animate, main } from './util.js'
 
-import { make_class } from './classis.js'
-import { join, mkel, shuffle, isProbablyInstalled, hook, select, defer, animate, main } from './util.js'
+function hook_chan (source, event, chan, options) {
+  options = options || {}
+  options.tag = options.tag || event
+
+  return hook(source, event, options, function (xe) {
+    let e = {
+      tag: options.tag,
+      type: xe.type
+    }
+
+    switch (xe.type) {
+    case 'click':
+      e.x = xe.offsetX
+      e.y = xe.offsetY
+      break
+    }
+
+    chan.send(e)
+  }, [])
+}
+
+function switchy (arg, opts) {
+  let o = opts[arg]
+  if (!o) {
+    o = opts['default']
+  }
+  if (!o) {
+    throw 'unhandled ' + arg
+  }
+  return o()
+}
 
 const GAME_MODES = [
   // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
@@ -13,6 +44,9 @@ const GAME_MODES = [
 
 const COLOR_ON = 'rgba(50,250,50,1)'
 const COLOR_OFF = 'rgba(150,50,50,1)'
+
+const NUM_SIDES = 4
+const OPPOSITES = [ 2, 3, 0, 1 ] // t, r, b, l => b, l, t, r
 
 const Stats = make_class('stats', {
   load (state) {
@@ -67,12 +101,12 @@ const Field = make_class('field', {
       if (c0.pulled) {
         continue
       }
-      for (let s = 0; s < 4; s++) {
+      for (let s = 0; s < NUM_SIDES; s++) {
         if (c0.routes[s]) {
           let nn = c0.neighbours[s]
           if (nn != null) {
             let n = array[nn]
-            if (n.routes[opposites[s]]) {
+            if (n.routes[OPPOSITES[s]]) {
               if (!lit.has(nn) && !n.pulled) {
                 lit.add(nn)
                 queue.push(n)
@@ -102,12 +136,16 @@ const Field = make_class('field', {
 
   turn_cell (cell) {
     cell.routes.unshift(cell.routes.pop())
-    cell.turns = (cell.turns + 1) % 4
+    let turns = (cell.turns + 1) % NUM_SIDES
+    if ((cell.sym === 2 && turns === 2) || cell.sym === 4) {
+      turns = 0
+    }
+    cell.turns = turns
   },
 
   shuffle (state) {
     for (let cell of state.array) {
-      let n = Math.random()*4
+      let n = Math.random()*NUM_SIDES
       for (let r = 0; r < n; r++) {
         this.turn_cell(cell)
       }
@@ -126,26 +164,35 @@ const Field = make_class('field', {
     }
   },
 
-  examine (state, x, y) {
+  identify (state, x, y) {
     let cell = state.array[(y * state.w) + x]
+    return cell.n
+  },
+
+  examine (state, id) {
+    let cell = state.array[id]
     return this.public_cell(state, cell)
   },
 
-  pull (state, x, y) {
-    let cell = state.array[(y * state.w) + x]
+  pull (state, id) {
+    let cell = state.array[id]
     if (cell.pulled) {
-      return null
+      return false
     }
     cell.pulled = true
     state.lit = this.find_lit(state.array)
-    return this.public_cell(state, cell)
+    return true
   },
 
-  push (state, x, y) {
-    let cell = state.array[(y * state.w) + x]
+  push (state, id) {
+    let cell = state.array[id]
+    if (!cell.pulled) {
+      return false
+    }
     this.turn_cell(cell)
     cell.pulled = false
     state.lit = this.find_lit(state.array)
+    return true
   },
 
   is_won (state) {
@@ -159,11 +206,12 @@ const Field = make_class('field', {
         yield function*() {
           for (let x = 0; x < state.w; x++) {
             let cell = state.array[(y * state.w) + x]
+            let turns = (cell.turns === 0 ? 0 : (cell.sym === 2 ? 1 : (NUM_SIDES - cell.turns)))
             yield {
               id: cell.n,
               x: cell.x,
               y: cell.y,
-              turn: (!cell.turns ? 0 : 4 - cell.turns)
+              turn: turns,
             }
           }
         }
@@ -174,15 +222,13 @@ const Field = make_class('field', {
 }, {
   is_won: {},
   shuffle: {},
+  identify: {},
   examine: {},
   pull: {},
   push: {},
   rows: {},
   solution: {},
 })
-
-// t, r, b, l => b, l, t, r
-const opposites = [ 2, 3, 0, 1 ]
 
 function new_field (w, h, wrap) {
   let state = { w, h }
@@ -205,7 +251,9 @@ function new_field (w, h, wrap) {
       let turns = 0
       let routes = [ t !== null, r !== null, b !== null, l !== null ]
 
-      array[n] = { n, x, y, type, routes, turns, neighbours }
+      let sym = 4
+
+      array[n] = { n, x, y, type, routes, turns, neighbours, sym }
     }
   }
 
@@ -241,18 +289,28 @@ function new_field (w, h, wrap) {
     }
 
     cells: for (let cell of array) {
+      cell.sym = function calc_sym (routes) {
+        let ends = routes.reduce((a, e) => a + (e ? 1 : 0), 0)
+        if (ends === NUM_SIDES) {
+          return NUM_SIDES
+        }
+        if (ends === 2 && routes.every((e, i) => e === cell.routes[OPPOSITES[i]])) {
+          return 2
+        }
+        return 1
+      }(cell.routes)
       if (cell.type !== 'pipe') {
         continue
       }
       if (cell.routes.filter(e => e).length !== 2) {
         continue
       }
-      for (let s = 0; s < 4; s++) {
+      for (let s = 0; s < NUM_SIDES; s++) {
         if (cell.routes[s]) {
           let nn = cell.neighbours[s]
           if (nn !== null) {
             let n = array[nn]
-            if (!n.routes[opposites[s]]) {
+            if (!n.routes[OPPOSITES[s]]) {
               cell.type = 'tgt'
               cell.routes[s] = false
               tgts.push(cell)
@@ -272,6 +330,83 @@ function new_field (w, h, wrap) {
   return Field.new(state)
 }
 
+const Animation = make_class('animation', {
+  update(state, now) {
+    let phase = (now - state.start) / state.length
+    if (phase < 1) {
+      state.target.phase = phase
+      return false
+    } else {
+      state.target.phase = 1
+      return true
+    }
+  },
+}, {
+  update: {},
+  target: {
+    get: 'target',
+  },
+})
+
+function new_animation (target, length, start) {
+  let state = {
+    target,
+    length,
+    start,
+  }
+
+  return Animation.new(state)
+}
+
+const Animations = make_class('animations', {
+  add(state, id, animation) {
+    let list = this.get_list(state, id)
+    list.push(animation)
+  },
+  get_list(state, id) {
+    let list = state.map.get(id)
+    if (!list) {
+      list = []
+      state.map.set(id, list)
+    }
+    return list
+  },
+  tick(state, now) {
+    for (let k of state.map.keys()) {
+      let list = state.map.get(k)
+      let anim = list[0]
+      if (!anim) {
+        state.map.delete(k)
+        continue
+      }
+      let done = anim.update(now)
+      if (done) {
+        list.shift()
+        state.output.send({
+          event: 'done',
+          id: k,
+          animation: anim,
+        })
+      }
+    }
+  },
+}, {
+  add: {},
+  tick: {},
+  output: {
+    get: 'output',
+  }
+})
+
+function new_animations () {
+  let state = {
+    map: new Map(),
+    output: make_channel(),
+  }
+
+  return Animations.new(state)
+}
+
 const Game = make_class('game', {
   setup_elements (s, parent) {
     s.canvas = mkel('canvas', {})
@@ -285,10 +420,6 @@ const Game = make_class('game', {
     status.appendChild(mkel('span', { text: ' time: ' }))
     status.appendChild(s.time_counter)
     parent.appendChild(status)
-  },
-
-  setup_events (s) {
-    hook(s.canvas, 'click', {}, this.on_click, [s])
   },
 
   draw_border (s, ctx) {
@@ -357,7 +488,7 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  draw_cell (s, ctx, cell, moving, active, now) {
+  draw_cell (s, ctx, cell, phase, active) {
     ctx.save()
 
     if (active) {
@@ -369,9 +500,9 @@ const Game = make_class('game', {
     ctx.fillStyle = 'rgba(255,255,255,0.1)'
     ctx.fillRect(1, 1, s.cell_width-2, s.cell_width-2)
 
-    if (moving) {
+    if (phase > 0) {
       ctx.translate(s.half_cell, s.half_cell)
-      ctx.rotate((Math.PI / 2) * moving.phase)
+      ctx.rotate((Math.PI / 2) * phase)
       ctx.translate(-s.half_cell, -s.half_cell)
     }
 
@@ -391,13 +522,14 @@ const Game = make_class('game', {
 
     ctx.restore()
   },
-  draw_cells (s, ctx, now) {
+  draw_cells (s, ctx) {
     ctx.save()
     for (let r of s.game.field.rows()) {
       ctx.save()
       for (let cell of r()) {
-        let moving = s.movings.get(cell.id)
-        this.draw_cell(s, ctx, cell, moving, this.is_active_cell(s, cell), now)
+        let id = cell.id
+        let cell_data = s.game.cell_data[id]
+        this.draw_cell(s, ctx, cell, cell_data.phase, this.is_active_cell(s, cell))
         ctx.translate(s.cell_width, 0)
       }
       ctx.restore()
@@ -405,47 +537,31 @@ const Game = make_class('game', {
     }
     ctx.restore()
   },
-  draw (s) {
-    let now = Date.now()
+  draw_all (s) {
+    let ctx = s.canvas.getContext('2d')
+    ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
 
-    if (s.force_draw || s.movings.size > 0) {
-      s.force_draw = false
-
-      for (let k of s.movings.keys()) {
-        let m = s.movings.get(k)
-        m.phase = (now - m.start) / s.animation_time
-        if (m.phase > 1) {
-          s.movings.delete(k)
-          if (m.cell) {
-            this.after_animate(s, m)
-          }
-        }
-      }
-
-      let ctx = s.canvas.getContext('2d')
-      ctx.clearRect(0, 0, s.canvas_width, s.canvas_height)
-
-      ctx.save()
-      if (!s.game.paused) {
-        this.draw_border(s, ctx)
-        ctx.translate(s.border_width, s.border_width)
-        this.draw_cells(s, ctx, now)
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.3)'
-        ctx.fillRect(0, 0, s.canvas_width, s.canvas_height)
-      }
-      ctx.restore()
+    ctx.save()
+    if (!s.game.paused) {
+      this.draw_border(s, ctx)
+      ctx.translate(s.border_width, s.border_width)
+      this.draw_cells(s, ctx)
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'
+      ctx.fillRect(0, 0, s.canvas_width, s.canvas_height)
     }
+    ctx.restore()
 
     s.click_counter.textContent = s.game.clicks
-    s.time_counter.textContent = this.seconds_gone(s.game)
-
-    animate(this.draw, [s])
+    if (s.game.cheated) {
+      s.time_counter.textContent = '∞'
+    } else {
+      s.time_counter.textContent = this.seconds_gone(s.game)
+    }
   },
 
   is_active_cell (state, cell) {
-    let ac = state.game.active_cell
-    return ac && ac.id === cell.id
+    return state.game.active_cell === cell.id
   },
 
   seconds_gone (game) {
@@ -456,46 +572,48 @@ const Game = make_class('game', {
     return Math.round(t / 1000)
   },
 
-  on_click (e, s) {
-    let scale = s.canvas.offsetWidth / s.canvas_width
-    let x = Math.floor((e.offsetX / scale - s.border_width) / s.cell_width)
-    let y = Math.floor((e.offsetY / scale - s.border_width) / s.cell_width)
+  on_click (state, offsetX, offsetY) {
+    // TODO - scaling should happen in controller
+    let scale = state.canvas.offsetWidth / state.canvas_width
+    let x = Math.floor((offsetX / scale - state.border_width) / state.cell_width)
+    let y = Math.floor((offsetY / scale - state.border_width) / state.cell_width)
 
-    let cell = s.game.field.pull(x, y)
-    if (cell) {
-      this.start_spin(s, cell, 1)
+    let field = state.game.field
+
+    let id = field.identify(x, y)
+    let cell_data = state.game.cell_data[id]
+
+    if (field.pull(id)) {
+      this.start_spin(state, cell_data)
     } else {
-      cell = s.game.field.examine(x, y)
-      s.movings.get(cell.id).times++
+      cell_data.turns++
     }
 
-    if (!this.is_active_cell(s, cell)) {
-      s.game.active_cell = cell
-      s.game.clicks++
+    if (!this.is_active_cell(state, cell_data)) {
+      state.game.active_cell = id
+      state.game.clicks++
     }
   },
 
-  start_spin (s, cell, times) {
-    s.movings.set(cell.id, {
-      start: Date.now(),
-      cell: cell,
-      times: times
-    })
+  start_spin (state, cell_data) {
+    let anim = new_animation(cell_data, state.animation_time, Date.now())
+    state.animations.add(cell_data.id, anim)
   },
 
-  after_animate (s, m) {
-    let {cell, times} = m
-    s.game.field.push(cell.x, cell.y)
+  after_move (state, cell_data) {
+    let field = state.game.field
 
-    if (this.check_win(s.game)) {
-      s.game.won = true
-      defer(0, this.on_win, [s])
+    field.push(cell_data.id)
+    cell_data.phase = 0
+
+    if (cell_data.turns > 0) {
+      field.pull(cell_data.id)
+      cell_data.turns--
+      this.start_spin(state, cell_data)
+      return false
     }
 
-    if (times > 1) {
-      s.game.field.pull(cell.x, cell.y)
-      this.start_spin(s, cell, times-1)
-    }
+    return true
   },
 
   check_win (game) {
@@ -512,25 +630,19 @@ const Game = make_class('game', {
     s.game.acc_time = (Date.now() - s.game.time)
 
     let time = Math.round(s.game.acc_time / 1000)
-    let clicks = s.game.clicks
+    let moves = s.game.clicks
 
-    let bests = s.stats.post(s.settings.mode, {
-      time: -time,
-      moves: -clicks
+    s.output.send({
+      event: 'win',
+      stats: { time, moves }
     })
-
-    let msg = `you won in ${time} seconds using ${clicks} moves!`
-    if (bests.length > 0) {
-      msg += `\nthat\'s your best ${join(bests, ' and ')}!`
-    }
-
-    defer(0, alert, [msg])
   },
 
-  new_game (s, settings) {
+  setup (s, settings) {
     s.settings = settings
     s.game = {
       field: new_field(s.settings.w, s.settings.h, s.settings.wrap),
+      cell_data: [],
       active_cell: null,
       clicks: 0,
       time: Date.now(),
@@ -539,21 +651,103 @@ const Game = make_class('game', {
       paused: false,
       cheated: false
     }
+    for (let r of s.game.field.rows()) {
+      for (let cell of r()) {
+        s.game.cell_data[cell.id] = {
+          id: cell.id,
+          phase: 0,
+          turns: 0,
+        }
+      }
+    }
     s.game.field.shuffle()
     s.canvas_width = s.settings.w*s.cell_width + s.border_width*2
     s.canvas_height = s.settings.h*s.cell_width + s.border_width*2
     s.canvas.width = s.canvas_width
     s.canvas.height = s.canvas_height
-    s.movings = new Map()
-    s.force_draw = true
   },
 
-  start (s, settings) {
-    this.new_game(s, settings)
-    animate(this.draw, [s])
+  start (state, settings) {
+    this.setup(state, settings)
+
+    let control = make_channel()
+    hook_chan(state.canvas, 'click', control)
+    let input = state.input
+    let anima = state.animations.output()
+    let frame = state.frame
+
+    run_proc(function* () {
+      main:
+      while (true) {
+        let [chan, msg] = yield [control, input, anima, frame]
+        let next = switchy(chan, {
+          [control]: () => switchy(msg.tag, {
+            click: () => this.on_click(state, msg.x, msg.y)
+          }),
+          [input]: () => switchy(msg.type, {
+            new_game: () => 'new_game',
+            pause: () => 'pause',
+            solve: () => 'solve',
+          }),
+          [anima]: () => {
+            let cell_data = state.game.cell_data[msg.id]
+            this.after_move(state, cell_data)
+            if (this.check_win(state.game)) {
+              state.game.won = true
+              return 'won'
+            }
+          },
+          [frame]: () => 'draw'
+        })
+
+        if (next === 'draw') {
+          let now = Date.now()
+          state.animations.tick(now)
+          this.draw_all(state)
+          continue main
+        }
+
+        if (next === 'new_game') {
+          this.setup(state, msg.settings)
+          continue main
+        }
+
+        if (next === 'pause') {
+          this.do_pause(state, msg.pause)
+          // draw once in paused mode
+          this.draw_all(state)
+          while (true) {
+            let [chan, msg] = yield [input]
+            if (msg.type === 'pause' && msg.pause === false) {
+              this.do_pause(state, false)
+              continue main
+            }
+          }
+        }
+
+        if (next === 'solve') {
+          let r = yield this.do_solve(state)
+          continue main
+        }
+
+        if (next === 'won') {
+          // force a draw of completed grid
+          this.draw_all(state)
+          this.on_win(state)
+          while (true) {
+            let [chan, msg] = yield [input]
+            if (msg.type === 'new_game') {
+              this.setup(state, msg.settings)
+              control.empty()
+              continue main
+            }
+          }
+        }
+      }
+    }.bind(this)())
   },
 
-  pause (s, p) {
+  do_pause (s, p) {
     if (p) {
       if (s.game.paused || s.game.won) {
         return
@@ -567,30 +761,79 @@ const Game = make_class('game', {
       s.game.time = Date.now()
       s.game.paused = false
     }
-    s.force_draw = true
   },
 
-  solve (s) {
+  do_solve (s) {
     s.game.cheated = true
-    for (let r of s.game.field.solution()) {
-      for (let cell of r()) {
-        if (cell.turn) {
-          this.start_spin(s, cell, cell.turn)
+
+    let anima = s.animations.output()
+    let frame = s.frame
+
+    return function* (ctx) {
+      for (let r of s.game.field.solution()) {
+        for (let cell of r()) {
+          if (cell.turn) {
+            let cell_data = s.game.cell_data[cell.id]
+            cell_data.turns = cell.turn-1
+            s.game.field.pull(cell_data.id)
+            this.start_spin(s, cell_data)
+            while (true) {
+              let [chan, msg] = yield [anima, frame]
+              let done = switchy(chan, {
+                [anima]: () => this.after_move(s, cell_data),
+                [frame]: () => {
+                  let now = Date.now()
+                  s.animations.tick(now)
+                  this.draw_all(s)
+                }
+              })
+              if (done) break
+            }
+          }
         }
       }
-    }
+      return 'ok'
+    }.bind(this)()
+  },
+
+  draw (state) {
+    state.frame.send({
+      type: 'frame',
+    })
+  },
+
+  new_game (state, settings) {
+    state.input.send({
+      type: 'new_game',
+      settings: settings,
+    })
+  },
+
+  pause (state, p) {
+    state.input.send({
+      type: 'pause',
+      pause: p,
+    })
+  },
+
+  solve (state) {
+    state.input.send({
+      type: 'solve',
+    })
   }
 }, {
   start: {},
   new_game: {},
   pause: {},
-  solve: {}
+  solve: {},
+  draw: {},
+  channel: {
+    get: 'output'
+  },
 })
 
-function new_game (element, stats) {
+function new_game (element) {
   let s = {
-    // from environment
-    stats: stats,
     // config
     border_width: 4,
     cell_width: 50,
@@ -600,14 +843,17 @@ function new_game (element, stats) {
     settings: null,
     // game state
     game: null,
+    output: make_channel(),
+    input: make_channel(),
+    frame: make_channel(0),
+    settled: make_channel(),
     // for drawing
-    movings: new Map(),
+    animations: new_animations(),
     canvas_width: 100,
     canvas_height: 100
   }
 
   Game.static.setup_elements(s, element)
-  Game.static.setup_events(s)
 
   return Game.new(s)
 }
@@ -633,8 +879,6 @@ const Controller = make_class('controller', {
     controls.appendChild(mkel('span', { text: ' | ' }))
     s.solve_button = mkel('button', { text: 'solve' })
     controls.appendChild(s.solve_button)
-    // s.help_button = mkel('a', { text: '?' })
-    // controls.appendChild(s.help_button)
     parent.appendChild(controls)
 
     for (let settings of GAME_MODES) {
@@ -650,32 +894,90 @@ const Controller = make_class('controller', {
     }
   },
 
-  setup_events (s) {
-    // hook(s.document, 'visibilitychange', {}, this.on_showhide, [s])
-    hook(s.document, 'focus', {}, this.on_focus, [s])
-    hook(s.document, 'blur', {}, this.on_focus, [s])
-    hook(s.new_game_button, 'click', {}, this.on_new_game_click, [s])
-    hook(s.solve_button, 'click', {}, this.on_solve_click, [s])
+  on_showhide (state) {
+    state.game.pause(state.document.hidden)
+  },
+  on_focus (state, e) {
+    state.game.pause(e.type === 'blur')
+  },
+  on_new_game_click (state, e) {
+    let settings = state.mode_select.options[state.mode_select.selectedIndex].settings
+    state.localStorage.setItem('settings', JSON.stringify(settings))
+    state.settings = settings
+    state.game.new_game(settings)
   },
 
-  on_showhide (e, s) {
-    s.game.pause(s.document.hidden)
-  },
-  on_focus (e, s) {
-    s.game.pause(e.type === 'blur')
-  },
-  on_new_game_click (e, s) {
-    let settings = s.mode_select.options[s.mode_select.selectedIndex].settings
-    s.localStorage.setItem('settings', JSON.stringify(settings))
-    s.settings = settings
-    s.game.new_game(settings)
-  },
-  on_solve_click (e, s) {
-    s.game.solve()
+  on_win (state, e) {
+    let win = e.stats
+    let bests = state.stats.post(state.settings.mode, {
+      time: -win.time,
+      moves: -win.moves
+    })
+
+    let msg = `you won in ${win.time} seconds using ${win.moves} moves!`
+    if (bests.length > 0) {
+      msg += `\nthat\'s your best ${join(bests, ' and ')}!`
+    }
+
+    alert(msg)
   },
 
   start (state) {
+    let world = make_channel()
+    hook_chan(state.document, 'visibilitychange', world)
+    hook_chan(state.document, 'focus', world)
+    hook_chan(state.document, 'blur', world)
+
+    let control = make_channel(0)
+    hook_chan(state.new_game_button, 'click', control, { tag: 'new_game_click' })
+    hook_chan(state.solve_button, 'click', control, { tag: 'solve_click' })
+
+    let game_events = state.game.channel()
+    let frame = make_channel(0)
+
+    run_proc(function* () {
+      while (true) {
+        let [chan, msg] = yield [world, control, game_events, frame]
+        let next = switchy(chan, {
+          [game_events]: () => switchy(msg.event, {
+            'win': () => this.on_win(state, msg)
+          }),
+          [world]: () => switchy(msg.tag, {
+            visibilitychange: () => this.on_showhide(state),
+            focus: () => this.on_focus(state, msg),
+            blur: () => this.on_focus(state, msg)
+          }),
+          [control]: () => switchy(msg.tag, {
+            new_game_click: () => this.on_new_game_click(state),
+            solve_click: () => 'solve'
+          }),
+          [frame]: () => state.game.draw(),
+        })
+
+        if (next === 'solve') {
+          state.game.solve()
+          let [chan, msg] = yield [world, game_events, frame]
+          switchy(chan, {
+            [world]: () => switchy(msg.tag, {
+              visibilitychange: () => this.on_showhide(state),
+              default: () => {}
+            }),
+            [game_events]: () => switchy(msg.event, {
+              'solved': () => {}
+            }),
+            [frame]: () => state.game.draw(),
+          })
+        }
+      }
+    }.bind(this)())
+
     state.game.start(state.settings)
+    animate(this.draw, [frame])
+  },
+
+  draw (frame) {
+    frame.send({})
+    animate(this.draw, [frame])
   }
 }, {
   start: {}
@@ -686,12 +988,12 @@ function new_controller (element, document, localStorage, game, stats) {
     document,
     localStorage,
     game,
-    stats
+    stats,
+    settings: null,
   }
 
   Controller.static.load(s)
   Controller.static.setup_elements(s, element)
-  Controller.static.setup_events(s)
 
   return Controller.new(s)
 }
@@ -702,7 +1004,7 @@ main(function ({window, document, localStorage}) {
   }
 
   let stats = new_stats(localStorage)
-  let game = new_game(select(document, '#game'), stats)
+  let game = new_game(select(document, '#game'))
   let controller = new_controller(select(document, '#game'), document, localStorage, game, stats)
 
   controller.start()
