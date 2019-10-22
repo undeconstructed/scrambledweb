@@ -377,6 +377,66 @@ function new_animations () {
   return Animations.new(state)
 }
 
+const Animator = make_class('animator', {
+  trigger (chan) {
+    animate(function () {
+      chan.send('frame')
+    })
+  },
+  start (state) {
+    let input = state.input
+
+    if (!state.running) {
+      state.running = true
+
+      run_proc(function* () {
+        main:
+        while (true) {
+          stopped:
+          while (true) {
+            let [chan, msg] = yield [input]
+            if (msg === 'start') {
+              this.trigger(input)
+              break
+            }
+          }
+          started:
+          while (true) {
+            let [chan, msg] = yield [input]
+            if (msg === 'stop') {
+              break
+            } else {
+              state.output.send({_p:1})
+              this.trigger(input)
+            }
+          }
+        }
+      }.bind(this))
+    }
+
+    input.send('start')
+  },
+  stop (state) {
+    state.input.send('stop')
+  }
+}, {
+  start: {},
+  stop: {},
+  output: {
+    get: 'output',
+  }
+})
+
+function new_animator () {
+  let state = {
+    running: false,
+    input: make_channel(),
+    output: make_channel(0),
+  }
+
+  return Animator.new(state)
+}
+
 const Game = make_class('game', {
   setup_elements (s, parent) {
     s.canvas = mkel('canvas', {})
@@ -906,7 +966,9 @@ const Controller = make_class('controller', {
     hook_chan(state.solve_button, 'click', control, { tag: 'solve_click' })
 
     let game_events = state.game.channel()
-    let frame = make_channel(0)
+
+    let animator = new_animator()
+    let frame = animator.output()
 
     run_proc(function* () {
       main:
@@ -930,6 +992,7 @@ const Controller = make_class('controller', {
         })
 
         if (next === 'pause') {
+          animator.stop()
           while (true) {
             let [chan, msg] = yield [world, game_events]
             let next = switchy(chan, {
@@ -943,6 +1006,7 @@ const Controller = make_class('controller', {
               }),
             })
             if (next === 'unpause') {
+              animator.start()
               continue main
             }
           }
@@ -966,12 +1030,7 @@ const Controller = make_class('controller', {
     }.bind(this))
 
     state.game.start(state.settings)
-    animate(this.draw, [frame])
-  },
-
-  draw (frame) {
-    frame.send({_p:1})
-    animate(this.draw, [frame])
+    animator.start()
   }
 }, {
   start: {}

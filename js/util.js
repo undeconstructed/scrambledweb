@@ -119,6 +119,7 @@ export function switchy (arg, opts) {
 }
 
 export function animate (func, args) {
+  args = args || []
   window.requestAnimationFrame(function() {
     func(...args)
   })
