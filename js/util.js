@@ -112,7 +112,10 @@ export function switchy (arg, opts) {
   if (!o) {
     throw new Error('switchy: unhandled ' + arg)
   }
-  return o()
+  if (typeof o === 'function') {
+    return o()
+  }
+  return o
 }
 
 export function animate (func, args) {

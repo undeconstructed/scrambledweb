@@ -934,7 +934,7 @@ const Controller = make_class('controller', {
             let [chan, msg] = yield [world, game_events]
             let next = switchy(chan, {
               [game_events]: () => switchy(msg.event, {
-                'unpause': 'unpause',
+                'unpause': () => 'unpause',
               }),
               [world]: () => switchy(msg.tag, {
                 visibilitychange: () => this.on_showhide(state),
