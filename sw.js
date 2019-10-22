@@ -1,4 +1,4 @@
-const VERSION = '0.3r2'
+const VERSION = '0.3r3'
 
 self.addEventListener('install', function (e) {
   // console.log('sw install', VERSION)
