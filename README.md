@@ -29,7 +29,7 @@ const Thing = make_class('thing', {
     let chan1 = state.ch
     run_proc(function* (ctx) {
       while (true) {
-        let (chan, msg) = yield [chan0, chan1]
+        let [chan, msg] = yield [chan0, chan1]
         switchy(chan, {
           [chan0]: () => foo,
           [chan1]: () => bar,
