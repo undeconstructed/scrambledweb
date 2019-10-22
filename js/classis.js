@@ -97,37 +97,60 @@ function new_object (state, ms, api, type) {
 }
 
 function send (state, msg) {
-  if (state.hook) {
-    run_hook(state, msg)
-    return true
+  if (state.cap === 0) {
+    // direct handoff only
+    let hook = state.hook
+    if (!hook) {
+      // if (!msg._p) {
+      //   console.log('nothing waits for', msg)
+      // }
+      return false
+    }
+    state.hook = null
+    // XXX - is it always okay to run the hook within send?
+    run_hook(hook, msg)
   }
-  if (state.array.length < state.cap) {
-    state.array.push(msg)
-    return true
+  if (state.array.length === state.cap) {
+    return false
   }
-  return false
+  state.array.push(msg)
+  maybe_hook(state)
+  return true
 }
 
 function hook (state, func, args) {
   state.hook = {
     func, args
   }
-  let msg = state.array.shift()
-  if (msg) {
-    run_hook(state, msg)
-  }
+  maybe_hook(state)
 }
 
 function unhook (state, func, args) {
   state.hook = null
 }
 
-function run_hook (state, msg) {
-  let hook = state.hook
-  state.hook = null
+function maybe_hook (state) {
   setTimeout(function () {
-    hook.func(msg, ...hook.args)
+    let hook = state.hook
+    if (!hook) {
+      return
+    }
+    let msg = state.array.shift()
+    if (!msg) {
+      return
+    }
+    state.hook = null
+    run_hook(hook, msg)
   }, 0)
+}
+
+function run_hook (hook, msg) {
+  try {
+    hook.func(msg, ...hook.args)
+  } catch (e) {
+    console.log('hook error', e)
+    return
+  }
 }
 
 let chan_count = 0
@@ -146,7 +169,7 @@ export function make_channel (cap) {
     send: (msg) => send(state, msg),
     hook: (func, args) => hook(state, func, args),
     unhook: (func, args) => unhook(state, func, args),
-    empty: () => {
+    drain: () => {
       let out = state.array
       state.array = []
       return out
@@ -176,10 +199,8 @@ function process_proc_yield (frame, y) {
     let fired = false
 
     let cb = function (msg, chan) {
-      if (fired) {
-        return
-      }
-      fired = false
+      assert(!fired)
+      fired = true
 
       for (let chan of chans) {
         chan.unhook(cb, [chan])
@@ -191,10 +212,12 @@ function process_proc_yield (frame, y) {
     for (let chan of chans) {
       chan.hook(cb, [chan])
     }
-  } else if (y.value.next) {
-    run_proc(y.value, frame)
   } else {
-    console.log(y)
+    try {
+      run_proc(y.value, frame)
+    } catch (e) {
+      console.log('yield error', e)
+    }
   }
 }
 
@@ -205,7 +228,7 @@ function iterate_proc(frame, value) {
       y = frame.gen.next(value)
     } catch (e) {
       console.log('proc error', e, frame)
-      throw e
+      return
     }
     process_proc_yield(frame, y)
   }, 0)
@@ -229,7 +252,7 @@ export function run_proc (p, parent) {
     }
     frame.gen = p(ctx)
   } else {
-    throw 'unknown proc type'
+    throw new Error('unknown proc type')
   }
 
   iterate_proc(frame, null)
