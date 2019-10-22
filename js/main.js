@@ -1,37 +1,5 @@
 import { make_class, make_channel, run_proc } from './classis.js'
-import { join, mkel, shuffle, isProbablyInstalled, hook, select, animate, main } from './util.js'
-
-function hook_chan (source, event, chan, options) {
-  options = options || {}
-  options.tag = options.tag || event
-
-  return hook(source, event, options, function (xe) {
-    let e = {
-      tag: options.tag,
-      type: xe.type
-    }
-
-    switch (xe.type) {
-    case 'click':
-      e.x = xe.offsetX
-      e.y = xe.offsetY
-      break
-    }
-
-    chan.send(e)
-  }, [])
-}
-
-function switchy (arg, opts) {
-  let o = opts[arg]
-  if (!o) {
-    o = opts['default']
-  }
-  if (!o) {
-    throw 'unhandled ' + arg
-  }
-  return o()
-}
+import { join, mkel, shuffle, isProbablyInstalled, hook, hook_chan, switchy, select, animate, main } from './util.js'
 
 const GAME_MODES = [
   // { mode: 'nop', w: 2, h: 2, wrap: false, hide4s: false },
@@ -251,7 +219,7 @@ function new_field (w, h, wrap) {
       let turns = 0
       let routes = [ t !== null, r !== null, b !== null, l !== null ]
 
-      let sym = 4
+      let sym = -1
 
       array[n] = { n, x, y, type, routes, turns, neighbours, sym }
     }
@@ -289,20 +257,11 @@ function new_field (w, h, wrap) {
     }
 
     cells: for (let cell of array) {
-      cell.sym = function calc_sym (routes) {
-        let ends = routes.reduce((a, e) => a + (e ? 1 : 0), 0)
-        if (ends === NUM_SIDES) {
-          return NUM_SIDES
-        }
-        if (ends === 2 && routes.every((e, i) => e === cell.routes[OPPOSITES[i]])) {
-          return 2
-        }
-        return 1
-      }(cell.routes)
       if (cell.type !== 'pipe') {
         continue
       }
-      if (cell.routes.filter(e => e).length !== 2) {
+      let num_routes = cell.routes.reduce((a, e) => a + (e ? 1 : 0), 0)
+      if (num_routes !== 2) {
         continue
       }
       for (let s = 0; s < NUM_SIDES; s++) {
@@ -320,6 +279,17 @@ function new_field (w, h, wrap) {
         }
       }
     }
+  }
+
+  for (let cell of array) {
+    let num_routes = cell.routes.reduce((a, e) => a + (e ? 1 : 0), 0)
+    let sym = 1
+    if (num_routes === NUM_SIDES) {
+      sym = NUM_SIDES
+    } else if (num_routes === 2 && cell.routes.every((e, i) => e === cell.routes[OPPOSITES[i]])) {
+      sym = 2
+    }
+    cell.sym = sym
   }
 
   state.array = array
@@ -670,7 +640,7 @@ const Game = make_class('game', {
   start (state, settings) {
     this.setup(state, settings)
 
-    let control = make_channel()
+    let control = make_channel(0)
     hook_chan(state.canvas, 'click', control)
     let input = state.input
     let anima = state.animations.output()
@@ -727,6 +697,7 @@ const Game = make_class('game', {
 
         if (next === 'solve') {
           let r = yield this.do_solve(state)
+          // control.drain()
           continue main
         }
 
@@ -738,7 +709,7 @@ const Game = make_class('game', {
             let [chan, msg] = yield [input]
             if (msg.type === 'new_game') {
               this.setup(state, msg.settings)
-              control.empty()
+              // control.drain()
               continue main
             }
           }
@@ -754,12 +725,14 @@ const Game = make_class('game', {
       }
       s.game.acc_time += (Date.now() - s.game.time)
       s.game.paused = true
+      s.output.send({ event: 'pause' })
     } else {
       if (!s.game.paused) {
         return
       }
       s.game.time = Date.now()
       s.game.paused = false
+      s.output.send({ event: 'unpause' })
     }
   },
 
@@ -844,7 +817,7 @@ function new_game (element) {
     // game state
     game: null,
     output: make_channel(),
-    input: make_channel(),
+    input: make_channel(0),
     frame: make_channel(0),
     settled: make_channel(),
     // for drawing
@@ -936,11 +909,13 @@ const Controller = make_class('controller', {
     let frame = make_channel(0)
 
     run_proc(function* () {
+      main:
       while (true) {
         let [chan, msg] = yield [world, control, game_events, frame]
         let next = switchy(chan, {
           [game_events]: () => switchy(msg.event, {
-            'win': () => this.on_win(state, msg)
+            'win': () => this.on_win(state, msg),
+            'pause': () => 'pause',
           }),
           [world]: () => switchy(msg.tag, {
             visibilitychange: () => this.on_showhide(state),
@@ -953,6 +928,25 @@ const Controller = make_class('controller', {
           }),
           [frame]: () => state.game.draw(),
         })
+
+        if (next === 'pause') {
+          while (true) {
+            let [chan, msg] = yield [world, game_events]
+            let next = switchy(chan, {
+              [game_events]: () => switchy(msg.event, {
+                'unpause': 'unpause',
+              }),
+              [world]: () => switchy(msg.tag, {
+                visibilitychange: () => this.on_showhide(state),
+                focus: () => this.on_focus(state, msg),
+                blur: () => this.on_focus(state, msg)
+              }),
+            })
+            if (next === 'unpause') {
+              continue main
+            }
+          }
+        }
 
         if (next === 'solve') {
           state.game.solve()
@@ -969,14 +963,14 @@ const Controller = make_class('controller', {
           })
         }
       }
-    }.bind(this)())
+    }.bind(this))
 
     state.game.start(state.settings)
     animate(this.draw, [frame])
   },
 
   draw (frame) {
-    frame.send({})
+    frame.send({_p:1})
     animate(this.draw, [frame])
   }
 }, {

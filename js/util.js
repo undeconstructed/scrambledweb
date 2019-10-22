@@ -83,6 +83,38 @@ export function hook (src, event, options, func, args) {
   }, options)
 }
 
+export function hook_chan (source, event, chan, options) {
+  options = options || {}
+  options.tag = options.tag || event
+
+  return hook(source, event, options, function (xe) {
+    let e = {
+      tag: options.tag,
+      type: xe.type
+    }
+
+    switch (xe.type) {
+    case 'click':
+      e.x = xe.offsetX
+      e.y = xe.offsetY
+      break
+    }
+
+    chan.send(e)
+  }, [])
+}
+
+export function switchy (arg, opts) {
+  let o = opts[arg]
+  if (!o) {
+    o = opts['default']
+  }
+  if (!o) {
+    throw new Error('switchy: unhandled ' + arg)
+  }
+  return o()
+}
+
 export function animate (func, args) {
   window.requestAnimationFrame(function() {
     func(...args)
